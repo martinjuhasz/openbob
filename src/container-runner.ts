@@ -167,25 +167,25 @@ async function getAgentContainer(groupFolder: string): Promise<string> {
 }
 
 /**
- * Stop a group's agent container.
+ * Stop and remove a group's agent container.
  */
 export async function stopGroupContainer(groupFolder: string): Promise<void> {
   const name = activeContainers.get(groupFolder)
   if (!name) return
-  await execAsync(`${DOCKER} stop -t 5 ${name}`).catch(() => {})
+  await execAsync(`${DOCKER} rm -f ${name}`).catch(() => {})
   activeContainers.delete(groupFolder)
-  logger.info({ groupFolder }, 'Agent container stopped')
+  logger.info({ groupFolder }, 'Agent container stopped and removed')
 }
 
 /**
- * Kill all yetaclaw agent containers (cleanup on host shutdown).
+ * Kill and remove all yetaclaw agent containers (cleanup on host shutdown).
  */
 export async function stopAllContainers(): Promise<void> {
   const names = [...activeContainers.values()]
   if (names.length === 0) return
-  await execAsync(`${DOCKER} stop -t 5 ${names.join(' ')}`).catch(() => {})
+  await execAsync(`${DOCKER} rm -f ${names.join(' ')}`).catch(() => {})
   activeContainers.clear()
-  logger.info({ count: names.length }, 'All agent containers stopped')
+  logger.info({ count: names.length }, 'All agent containers stopped and removed')
 }
 
 /**
@@ -203,6 +203,10 @@ export async function runAgentSession(input: ContainerInput): Promise<ContainerO
   }
 
   const client = createOpencodeClient({ baseUrl: `http://${agentName}:${OPENCODE_PORT}` })
+
+  // Write context.json so the agent knows its own chatJid for IPC
+  const contextFile = path.join(GROUPS_DIR, groupFolder, 'context.json')
+  fs.writeFileSync(contextFile, JSON.stringify({ chatJid, groupFolder }, null, 2))
 
   // Resume existing session or create new one
   let sessionId = input.sessionId ?? getSession(groupFolder) ?? undefined
@@ -304,6 +308,7 @@ export async function runAgentSession(input: ContainerInput): Promise<ContainerO
  */
 export async function warmUpContainers(groupFolders: string[]): Promise<void> {
   if (groupFolders.length === 0) return
+  await cleanupStoppedContainers()
   logger.info({ count: groupFolders.length }, 'Pre-warming agent containers')
   await Promise.allSettled(
     groupFolders.map(async (folder) => {
@@ -318,21 +323,18 @@ export async function warmUpContainers(groupFolders: string[]): Promise<void> {
 }
 
 /**
- * Stop agent containers that have been idle longer than IDLE_TIMEOUT.
+ * Remove all exited yetaclaw agent containers (orphans from previous runs or crashes).
  */
-export async function cleanupIdleContainers(): Promise<void> {
+export async function cleanupStoppedContainers(): Promise<void> {
   try {
     const { stdout } = await execAsync(
-      `${DOCKER} ps --filter label=yetaclaw.group --format '{{.Names}} {{.Status}}'`,
+      `${DOCKER} ps -aq --filter label=yetaclaw.group --filter status=exited --filter status=dead`,
     )
-    for (const line of stdout.trim().split('\n').filter(Boolean)) {
-      const [name] = line.split(' ')
-      // Parse uptime from Status field — simplified check
-      const folder = name?.replace('yetaclaw-agent-', '')
-      if (!folder) continue
-      // Let Docker handle cleanup via --rm; containers auto-remove when stopped
-    }
+    const ids = stdout.trim().split('\n').filter(Boolean)
+    if (ids.length === 0) return
+    await execAsync(`${DOCKER} rm ${ids.join(' ')}`).catch(() => {})
+    logger.info({ count: ids.length }, 'Removed stopped agent containers')
   } catch {
-    // Docker not available or no containers
+    // Docker not available or no containers — ignore
   }
 }
