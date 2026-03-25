@@ -299,6 +299,13 @@ async function main(): Promise<void> {
     onTasksChanged: () => {
       logger.debug('Tasks changed via IPC')
     },
+    onGroupRegistered: (config) => {
+      registeredGroups[config.jid] = config
+      logger.info({ jid: config.jid, name: config.name }, 'Group registered at runtime')
+      warmUpContainers([config.folder]).catch((err) =>
+        logger.warn({ folder: config.folder, err }, 'Pre-warm failed for new group'),
+      )
+    },
   })
 
   queue.setProcessMessagesFn(processGroupMessages)

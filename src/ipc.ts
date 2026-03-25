@@ -10,6 +10,7 @@ import { DATA_DIR, POLL_INTERVAL } from './config.js'
 import {
   deleteTask,
   getActiveTasks,
+  setRegisteredGroup,
   upsertTask,
 } from './db.js'
 import { logger } from './logger.js'
@@ -19,6 +20,7 @@ export interface IpcDeps {
   sendMessage: (jid: string, text: string) => Promise<void>
   registeredGroups: () => Record<string, GroupConfig>
   onTasksChanged: () => void
+  onGroupRegistered: (config: GroupConfig) => void
 }
 
 let ipcWatcherRunning = false
@@ -154,6 +156,12 @@ export async function processTaskIpc(
     scheduleValue?: string
     contextMode?: string
     targetJid?: string
+    // register_group fields
+    jid?: string
+    name?: string
+    folder?: string
+    trigger?: string
+    isMain?: boolean
   },
   sourceGroup: string,
   isMain: boolean,
@@ -278,6 +286,41 @@ export async function processTaskIpc(
           'Unauthorized task pause attempt or task not found',
         )
       }
+      break
+    }
+
+    case 'register_group': {
+      if (!isMain) {
+        logger.warn({ sourceGroup }, 'register_group: only main group is allowed')
+        break
+      }
+      if (!data.jid || !data.name || !data.folder || !data.trigger) {
+        logger.warn({ data, sourceGroup }, 'register_group: missing required fields (jid, name, folder, trigger)')
+        break
+      }
+      const existing = deps.registeredGroups()
+      if (existing[data.jid]) {
+        logger.warn({ jid: data.jid }, 'register_group: group already registered')
+        break
+      }
+      // Check for folder collision
+      const folderCollision = Object.values(existing).find((g) => g.folder === data.folder)
+      if (folderCollision) {
+        logger.warn({ folder: data.folder }, 'register_group: folder already in use')
+        break
+      }
+      const config: GroupConfig = {
+        jid: data.jid,
+        name: data.name,
+        folder: data.folder,
+        trigger: data.trigger,
+        channel: data.jid.split(':')[0] ?? 'mattermost',
+        isMain: data.isMain === true,
+        createdAt: Date.now(),
+      }
+      setRegisteredGroup(config)
+      deps.onGroupRegistered(config)
+      logger.info({ jid: data.jid, name: data.name, folder: data.folder }, 'Group registered via IPC')
       break
     }
 

@@ -92,6 +92,19 @@ Write a JSON file to `/workspace/ipc/tasks/`:
 { "type": "pause_task",  "taskId": "daily-briefing" }
 ```
 
+**Register a new group (main group only):**
+```json
+{
+  "type": "register_group",
+  "jid": "mm:CHANNEL_ID",
+  "name": "Sales Team",
+  "folder": "sales",
+  "trigger": "winston",
+  "isMain": false
+}
+```
+Active immediately — no restart needed. Bot user must already be a member of that channel in Mattermost.
+
 Fields:
 - `scheduleType`: `cron` | `interval` (ms) | `once` (ISO timestamp, no Z suffix)
 - `contextMode`: `group` (has chat history) | `isolated` (fresh session — include all context in prompt)

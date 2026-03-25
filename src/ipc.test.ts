@@ -7,9 +7,10 @@ vi.mock('./db.js', () => ({
   getActiveTasks: vi.fn(() => []),
   upsertTask: vi.fn(),
   deleteTask: vi.fn(),
+  setRegisteredGroup: vi.fn(),
 }))
 
-import { upsertTask, deleteTask, getActiveTasks } from './db.js'
+import { upsertTask, deleteTask, getActiveTasks, setRegisteredGroup } from './db.js'
 
 function makeGroup(overrides: Partial<GroupConfig> = {}): GroupConfig {
   return {
@@ -24,15 +25,18 @@ function makeGroup(overrides: Partial<GroupConfig> = {}): GroupConfig {
   }
 }
 
-function makeDeps(groups: Record<string, GroupConfig> = {}): IpcDeps & { sent: string[], tasksChanged: number[] } {
+function makeDeps(groups: Record<string, GroupConfig> = {}): IpcDeps & { sent: string[], tasksChanged: number[], registered: GroupConfig[] } {
   const sent: string[] = []
   const tasksChanged: number[] = []
+  const registered: GroupConfig[] = []
   return {
     sent,
     tasksChanged,
+    registered,
     sendMessage: async (_jid, text) => { sent.push(text) },
     registeredGroups: () => groups,
     onTasksChanged: () => { tasksChanged.push(1) },
+    onGroupRegistered: (config) => { registered.push(config) },
   }
 }
 
@@ -163,5 +167,72 @@ describe('processTaskIpc', () => {
       folderToJid,
       deps,
     )
+  })
+
+  describe('register_group', () => {
+    it('registers a new group from main group', async () => {
+      const deps = makeDeps({})
+      await processTaskIpc(
+        { type: 'register_group', jid: 'mm:new', name: 'New Group', folder: 'new-group', trigger: 'winston' },
+        'main-group',
+        true,
+        new Map(),
+        deps,
+      )
+      expect(setRegisteredGroup).toHaveBeenCalledOnce()
+      expect(deps.registered).toHaveLength(1)
+      expect(deps.registered[0]).toMatchObject({ jid: 'mm:new', name: 'New Group', folder: 'new-group' })
+    })
+
+    it('blocks registration from non-main group', async () => {
+      const deps = makeDeps({})
+      await processTaskIpc(
+        { type: 'register_group', jid: 'mm:new', name: 'New', folder: 'new', trigger: 'winston' },
+        'some-group',
+        false,
+        new Map(),
+        deps,
+      )
+      expect(setRegisteredGroup).not.toHaveBeenCalled()
+      expect(deps.registered).toHaveLength(0)
+    })
+
+    it('blocks registration of already-registered jid', async () => {
+      const existing = { 'mm:existing': makeGroup({ jid: 'mm:existing', folder: 'existing' }) }
+      const deps = makeDeps(existing)
+      await processTaskIpc(
+        { type: 'register_group', jid: 'mm:existing', name: 'Dup', folder: 'dup', trigger: 'winston' },
+        'main-group',
+        true,
+        new Map(),
+        deps,
+      )
+      expect(setRegisteredGroup).not.toHaveBeenCalled()
+    })
+
+    it('blocks registration when folder already in use', async () => {
+      const existing = { 'mm:other': makeGroup({ jid: 'mm:other', folder: 'taken' }) }
+      const deps = makeDeps(existing)
+      await processTaskIpc(
+        { type: 'register_group', jid: 'mm:new', name: 'New', folder: 'taken', trigger: 'winston' },
+        'main-group',
+        true,
+        new Map(),
+        deps,
+      )
+      expect(setRegisteredGroup).not.toHaveBeenCalled()
+    })
+
+    it('blocks registration with missing fields', async () => {
+      const deps = makeDeps({})
+      await processTaskIpc(
+        { type: 'register_group', jid: 'mm:new' }, // missing name, folder, trigger
+        'main-group',
+        true,
+        new Map(),
+        deps,
+      )
+      expect(setRegisteredGroup).not.toHaveBeenCalled()
+    })
   })
 })
