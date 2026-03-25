@@ -1,0 +1,69 @@
+services:
+
+  yetaclaw-host:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: yetaclaw-host:latest
+    container_name: yetaclaw-host
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock   # Spawn agent containers
+      - ${DATA_PATH}:/data                           # DB + IPC + opencode config
+      - ./workspace:/workspace                       # Shared workspace
+      - ./skills:/skills:ro
+    environment:
+      # Mattermost
+      - MATTERMOST_URL=${MATTERMOST_URL}
+      - MATTERMOST_TOKEN=${MATTERMOST_TOKEN}
+      # Model — format: providerID/modelID
+      - MODEL=${MODEL:-anthropic/claude-sonnet-4-6}
+      # Paths inside container
+      - DATA_DIR=/data
+      - GROUPS_DIR=/workspace/groups
+      # Docker
+      - DOCKER_NETWORK=yetaclaw
+      - AGENT_IMAGE=yetaclaw-agent:latest
+      # DATA_PATH passed through so agent spawner knows the absolute host path
+      - DATA_PATH=${DATA_PATH}
+      # Initial group registration (first run — leave empty to skip)
+      - INITIAL_GROUP_JID=${INITIAL_GROUP_JID:-}
+      - INITIAL_GROUP_NAME=${INITIAL_GROUP_NAME:-Main}
+      - INITIAL_GROUP_FOLDER=${INITIAL_GROUP_FOLDER:-main}
+      - INITIAL_GROUP_TRIGGER=${INITIAL_GROUP_TRIGGER:-yetaclaw}
+      - INITIAL_GROUP_IS_MAIN=${INITIAL_GROUP_IS_MAIN:-true}
+      # Optional
+      - OPENVIKING_URL=http://openviking:1933
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+    networks:
+      - yetaclaw
+
+  # Agent image — built by `docker compose build`, spawned on-demand by host via Docker socket
+  yetaclaw-agent:
+    build:
+      context: ./agent
+      dockerfile: Dockerfile
+    image: yetaclaw-agent:latest
+    profiles:
+      - build
+    networks:
+      - yetaclaw
+
+  openviking:
+    build:
+      context: ./openviking
+      dockerfile: Dockerfile
+    image: yetaclaw-openviking:latest
+    container_name: yetaclaw-openviking
+    restart: unless-stopped
+    volumes:
+      - ${DATA_PATH}/openviking:/data
+      - ./openviking/ov.conf:/app/ov.conf:ro
+    networks:
+      - yetaclaw
+    profiles:
+      - memory
+
+networks:
+  yetaclaw:
+    name: yetaclaw

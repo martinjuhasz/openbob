@@ -1,0 +1,25 @@
+# Dependencies
+node_modules/
+agent/node_modules/
+
+# Build output
+dist/
+agent/dist/
+
+# Local data
+workspace/groups/
+openviking-data/
+models/
+
+# Secrets
+.env
+
+# Temp
+.tmp-*
+
+# OS
+.DS_Store
+
+# IDE
+.idea/
+.vscode/
