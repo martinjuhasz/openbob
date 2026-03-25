@@ -8,7 +8,7 @@ import path from 'path'
 import { createOpencodeClient } from '@opencode-ai/sdk'
 import { promisify } from 'util'
 
-import { DATA_DIR, GROUPS_DIR, IDLE_TIMEOUT } from './config.js'
+import { DATA_DIR, GROUPS_DIR, SKILLS_DIR, IDLE_TIMEOUT } from './config.js'
 import { setSession, getSession } from './db.js'
 import { logger } from './logger.js'
 import { ContainerInput, ContainerOutput } from './types.js'
@@ -20,6 +20,32 @@ const AGENT_IMAGE = process.env['AGENT_IMAGE'] ?? 'yetaclaw-agent:latest'
 const DOCKER_NETWORK = process.env['DOCKER_NETWORK'] ?? 'yetaclaw'
 // DATA_PATH: absolute path on the Docker host (same value used in compose bind mount)
 const DATA_PATH_HOST = process.env['DATA_PATH'] ?? DATA_DIR
+
+// WORKSPACE_PATH: actual host path for /workspace inside this container.
+// Resolved by inspecting our own container's mount table at startup.
+// Falls back to env var WORKSPACE_PATH if set, or empty string (mounts skipped).
+let WORKSPACE_PATH_HOST = process.env['WORKSPACE_PATH'] ?? ''
+let SKILLS_PATH_HOST = process.env['SKILLS_PATH'] ?? ''
+
+async function resolveHostPaths(): Promise<void> {
+  if (WORKSPACE_PATH_HOST && SKILLS_PATH_HOST) return
+  try {
+    const selfName = process.env['HOSTNAME'] ?? 'yetaclaw-host'
+    const { stdout } = await execAsync(
+      `${DOCKER} inspect ${selfName} --format '{{range .Mounts}}{{.Destination}}:{{.Source}};{{end}}'`,
+    )
+    for (const entry of stdout.split(';')) {
+      const [dest, src] = entry.trim().split(':')
+      if (!dest || !src) continue
+      if (!WORKSPACE_PATH_HOST && dest === '/workspace') WORKSPACE_PATH_HOST = src
+      if (!SKILLS_PATH_HOST && dest === '/skills') SKILLS_PATH_HOST = src
+    }
+    logger.info({ WORKSPACE_PATH_HOST, SKILLS_PATH_HOST }, 'Resolved host paths via docker inspect')
+  } catch (err) {
+    logger.warn({ err }, 'Could not resolve host paths via docker inspect — workspace/skills mounts will be skipped')
+  }
+}
+
 const OPENCODE_PORT = 4096
 const SERVER_READY_TIMEOUT = 30_000 // 30s
 const SERVER_POLL_INTERVAL = 500 // 0.5s
@@ -62,7 +88,14 @@ async function spawnContainer(groupFolder: string): Promise<string> {
   fs.mkdirSync(opencodeDir, { recursive: true })
   fs.chmodSync(opencodeDir, 0o777)
 
-  const globalDir = path.join(GROUPS_DIR, 'global')
+  // Compute host-side paths for workspace and skills mounts
+  const groupDirHost = WORKSPACE_PATH_HOST
+    ? path.join(WORKSPACE_PATH_HOST, 'groups', groupFolder)
+    : null
+  const globalDirHost = WORKSPACE_PATH_HOST
+    ? path.join(WORKSPACE_PATH_HOST, 'groups', 'global')
+    : null
+  const agentsMdHost = globalDirHost ? path.join(globalDirHost, 'AGENTS.md') : null
 
   // No port publish needed — host connects via Docker network using container name
   // Note: no --rm so we can fetch logs on crash; containers are cleaned up in spawnContainer
@@ -74,16 +107,17 @@ async function spawnContainer(groupFolder: string): Promise<string> {
     '-e', `OPENCODE_PORT=${OPENCODE_PORT}`,
     // Data dir — bind mount, same absolute host path as in compose
     '-v', `${DATA_PATH_HOST}:/data`,
-    // Workspace mounts
-    '-v', `${groupDir}:/workspace/group`,
-    ...(fs.existsSync(globalDir) ? [
-      '-v', `${globalDir}:/workspace/global:ro`,
-      // Mount AGENTS.md one level up so OpenCode finds it when traversing from /workspace/group
-      ...(fs.existsSync(path.join(globalDir, 'AGENTS.md'))
-        ? ['-v', `${path.join(globalDir, 'AGENTS.md')}:/workspace/AGENTS.md:ro`]
-        : []),
+    // Workspace mounts (only if host paths resolved)
+    ...(groupDirHost ? ['-v', `${groupDirHost}:/workspace/group`] : []),
+    ...(globalDirHost && fs.existsSync(path.join(GROUPS_DIR, 'global')) ? [
+      '-v', `${globalDirHost}:/workspace/global:ro`,
+    ] : []),
+    ...(agentsMdHost && fs.existsSync(path.join(GROUPS_DIR, 'global', 'AGENTS.md')) ? [
+      '-v', `${agentsMdHost}:/workspace/AGENTS.md:ro`,
     ] : []),
     '-v', `${ipcDir}:/workspace/ipc`,
+    // Skills — read-only, shared across all agent containers
+    ...(SKILLS_PATH_HOST ? ['-v', `${SKILLS_PATH_HOST}:/skills:ro`] : []),
     // Labels for cleanup
     '--label', `yetaclaw.group=${groupFolder}`,
     AGENT_IMAGE,
@@ -314,6 +348,7 @@ export async function runAgentSession(input: ContainerInput): Promise<ContainerO
  */
 export async function warmUpContainers(groupFolders: string[]): Promise<void> {
   if (groupFolders.length === 0) return
+  await resolveHostPaths()
   await cleanupStoppedContainers()
   logger.info({ count: groupFolders.length }, 'Pre-warming agent containers')
   await Promise.allSettled(
