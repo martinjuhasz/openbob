@@ -76,7 +76,13 @@ async function spawnContainer(groupFolder: string): Promise<string> {
     '-v', `${DATA_PATH_HOST}:/data`,
     // Workspace mounts
     '-v', `${groupDir}:/workspace/group`,
-    ...(fs.existsSync(globalDir) ? ['-v', `${globalDir}:/workspace/global:ro`] : []),
+    ...(fs.existsSync(globalDir) ? [
+      '-v', `${globalDir}:/workspace/global:ro`,
+      // Mount AGENTS.md one level up so OpenCode finds it when traversing from /workspace/group
+      ...(fs.existsSync(path.join(globalDir, 'AGENTS.md'))
+        ? ['-v', `${path.join(globalDir, 'AGENTS.md')}:/workspace/AGENTS.md:ro`]
+        : []),
+    ] : []),
     '-v', `${ipcDir}:/workspace/ipc`,
     // Labels for cleanup
     '--label', `yetaclaw.group=${groupFolder}`,

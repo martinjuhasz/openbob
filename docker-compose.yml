@@ -42,13 +42,14 @@ services:
       - yetaclaw
 
   # Agent image — built by `docker compose build`, spawned on-demand by host via Docker socket
+  # deploy.replicas=0 prevents it from starting as a container on `compose up`
   yetaclaw-agent:
     build:
       context: ./agent
       dockerfile: Dockerfile
     image: yetaclaw-agent:latest
-    profiles:
-      - build
+    deploy:
+      replicas: 0
     networks:
       - yetaclaw
 
