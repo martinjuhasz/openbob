@@ -18,6 +18,9 @@ services:
       - MATTERMOST_TOKEN=${MATTERMOST_TOKEN}
       # Model — format: providerID/modelID
       - MODEL=${MODEL:-anthropic/claude-sonnet-4-6}
+      # API keys — forwarded to agent containers via client.auth.set()
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
       # Paths inside container
       - DATA_DIR=/data
       - GROUPS_DIR=/workspace/groups

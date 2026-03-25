@@ -23,30 +23,26 @@ const DATA_PATH_HOST = process.env['DATA_PATH'] ?? DATA_DIR
 const OPENCODE_PORT = 4096
 const SERVER_READY_TIMEOUT = 30_000 // 30s
 const SERVER_POLL_INTERVAL = 500 // 0.5s
+// API keys to configure on agent containers after startup
+// Key: providerID (e.g. 'anthropic', 'openrouter'), Value: API key
+const PROVIDER_API_KEYS: Record<string, string> = {}
+if (process.env['ANTHROPIC_API_KEY']) PROVIDER_API_KEYS['anthropic'] = process.env['ANTHROPIC_API_KEY']
+if (process.env['OPENROUTER_API_KEY']) PROVIDER_API_KEYS['openrouter'] = process.env['OPENROUTER_API_KEY']
 
-// Track running containers per group: folder → { name, hostPort }
-const activeContainers = new Map<string, { name: string; hostPort: number }>()
+// Track running containers per group: folder → name
+const activeContainers = new Map<string, string>()
+// Deduplicate concurrent spawn calls for the same group
+const spawnInProgress = new Map<string, Promise<string>>()
 
 function containerName(groupFolder: string): string {
   return `yetaclaw-agent-${groupFolder}`
 }
 
-async function findFreePort(): Promise<number> {
-  const { stdout } = await execAsync(
-    `${DOCKER} run --rm alpine sh -c 'nc -l -p 0 &>/dev/null & echo $! && sleep 0.1 && kill $! 2>/dev/null; true'`,
-  ).catch(() => ({ stdout: '' }))
-  // Fallback: use random port in range 20000-30000
-  if (!stdout) {
-    return 20000 + Math.floor(Math.random() * 10000)
-  }
-  return 0 // use dynamic port assignment below
-}
-
 /**
- * Spawn the agent container for a group, wait for OpenCode server to be ready.
- * Returns the host port the server is accessible on.
+ * Spawn the agent container for a group.
+ * Returns the container name (reachable via Docker network).
  */
-async function spawnContainer(groupFolder: string): Promise<number> {
+async function spawnContainer(groupFolder: string): Promise<string> {
   const name = containerName(groupFolder)
 
   // Clean up any previous stopped container with same name
@@ -54,21 +50,26 @@ async function spawnContainer(groupFolder: string): Promise<number> {
 
   const groupDir = path.join(GROUPS_DIR, groupFolder)
   fs.mkdirSync(groupDir, { recursive: true })
+  fs.chmodSync(groupDir, 0o777)
 
   const ipcDir = path.join(DATA_DIR, 'ipc', groupFolder)
   fs.mkdirSync(path.join(ipcDir, 'tasks'), { recursive: true })
   fs.mkdirSync(path.join(ipcDir, 'input'), { recursive: true })
+  fs.chmodSync(ipcDir, 0o777)
+
+  // Pre-create /data/opencode so the node user can access it in the agent container
+  const opencodeDir = path.join(DATA_DIR, 'opencode')
+  fs.mkdirSync(opencodeDir, { recursive: true })
+  fs.chmodSync(opencodeDir, 0o777)
 
   const globalDir = path.join(GROUPS_DIR, 'global')
 
-  // Dynamic port assignment — Docker picks a free host port
+  // No port publish needed — host connects via Docker network using container name
+  // Note: no --rm so we can fetch logs on crash; containers are cleaned up in spawnContainer
   const cmd = [
     DOCKER, 'run', '-d',
     '--name', name,
-    '--rm',
     '--network', DOCKER_NETWORK,
-    // Publish OpenCode port (dynamic host port)
-    '-p', `${OPENCODE_PORT}`,
     // Environment
     '-e', `OPENCODE_PORT=${OPENCODE_PORT}`,
     // Data dir — bind mount, same absolute host path as in compose
@@ -83,66 +84,95 @@ async function spawnContainer(groupFolder: string): Promise<number> {
   ]
 
   logger.info({ groupFolder, name }, 'Spawning agent container')
-  const { stdout: containerId } = await execAsync(cmd.join(' '))
-  const id = containerId.trim()
+  await execAsync(cmd.join(' '))
 
-  // Get dynamically assigned host port
-  const { stdout: portOut } = await execAsync(
-    `${DOCKER} port ${id} ${OPENCODE_PORT}/tcp`,
-  )
-  const hostPort = parseInt(portOut.trim().split(':').pop() ?? '0', 10)
-  if (!hostPort) throw new Error(`Could not determine host port for container ${name}`)
-
-  activeContainers.set(groupFolder, { name, hostPort })
-  logger.info({ groupFolder, name, hostPort }, 'Agent container started')
-  return hostPort
+  activeContainers.set(groupFolder, name)
+  logger.info({ groupFolder, name }, 'Agent container started')
+  return name
 }
 
 /**
- * Wait for OpenCode server health check to pass.
+ * Wait for OpenCode server health check to pass (via Docker network hostname).
  */
-async function waitForServer(hostPort: number): Promise<void> {
+async function waitForServer(containerName: string): Promise<void> {
+  const baseUrl = `http://${containerName}:${OPENCODE_PORT}`
   const deadline = Date.now() + SERVER_READY_TIMEOUT
   while (Date.now() < deadline) {
     try {
-      const client = createOpencodeClient({ baseUrl: `http://localhost:${hostPort}` })
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const health = await (client.global as any).health()
-      if (health.data?.healthy) return
+      const res = await fetch(`${baseUrl}/session`)
+      if (res.ok) return
     } catch {
       // not ready yet
     }
     await new Promise((r) => setTimeout(r, SERVER_POLL_INTERVAL))
   }
-  throw new Error(`OpenCode server on port ${hostPort} did not become ready in time`)
+  // Collect container logs for diagnostics before failing
+  const { stdout: containerLogs } = await execAsync(
+    `${DOCKER} logs --tail 50 ${containerName} 2>&1`,
+  ).catch(() => ({ stdout: '(could not fetch logs)' }))
+  logger.error({ containerName, containerLogs }, 'Agent container logs on timeout')
+  throw new Error(`OpenCode server at ${baseUrl} did not become ready in time`)
+}
+
+/**
+ * Configure provider API keys on a freshly started agent container.
+ */
+async function configureAuth(containerName: string): Promise<void> {
+  if (Object.keys(PROVIDER_API_KEYS).length === 0) return
+  const client = createOpencodeClient({ baseUrl: `http://${containerName}:${OPENCODE_PORT}` })
+  for (const [providerID, key] of Object.entries(PROVIDER_API_KEYS)) {
+    const res = await client.auth.set({
+      path: { id: providerID },
+      body: { type: 'api', key },
+    })
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    if ((res as any).error) {
+      logger.warn({ containerName, providerID, error: (res as any).error }, 'Failed to configure provider auth')
+    } else {
+      logger.info({ containerName, providerID }, 'Provider API key configured on agent container')
+    }
+  }
 }
 
 /**
  * Get or reuse an existing agent container for a group.
+ * Returns the container name for direct Docker network access.
+ * Deduplicates concurrent spawn calls for the same group.
  */
-async function getAgentPort(groupFolder: string): Promise<number> {
+async function getAgentContainer(groupFolder: string): Promise<string> {
   const existing = activeContainers.get(groupFolder)
   if (existing) {
     // Verify container still running
     try {
-      execSync(`${DOCKER} inspect ${existing.name}`, { stdio: 'pipe' })
-      return existing.hostPort
+      execSync(`${DOCKER} inspect ${existing}`, { stdio: 'pipe' })
+      return existing
     } catch {
       activeContainers.delete(groupFolder)
     }
   }
-  const hostPort = await spawnContainer(groupFolder)
-  await waitForServer(hostPort)
-  return hostPort
+
+  // Deduplicate concurrent spawns for the same group
+  const inFlight = spawnInProgress.get(groupFolder)
+  if (inFlight) return inFlight
+
+  const p = (async () => {
+    const name = await spawnContainer(groupFolder)
+    await waitForServer(name)
+    await configureAuth(name)
+    return name
+  })().finally(() => spawnInProgress.delete(groupFolder))
+
+  spawnInProgress.set(groupFolder, p)
+  return p
 }
 
 /**
  * Stop a group's agent container.
  */
 export async function stopGroupContainer(groupFolder: string): Promise<void> {
-  const existing = activeContainers.get(groupFolder)
-  if (!existing) return
-  await execAsync(`${DOCKER} stop -t 5 ${existing.name}`).catch(() => {})
+  const name = activeContainers.get(groupFolder)
+  if (!name) return
+  await execAsync(`${DOCKER} stop -t 5 ${name}`).catch(() => {})
   activeContainers.delete(groupFolder)
   logger.info({ groupFolder }, 'Agent container stopped')
 }
@@ -151,7 +181,7 @@ export async function stopGroupContainer(groupFolder: string): Promise<void> {
  * Kill all yetaclaw agent containers (cleanup on host shutdown).
  */
 export async function stopAllContainers(): Promise<void> {
-  const names = [...activeContainers.values()].map((c) => c.name)
+  const names = [...activeContainers.values()]
   if (names.length === 0) return
   await execAsync(`${DOCKER} stop -t 5 ${names.join(' ')}`).catch(() => {})
   activeContainers.clear()
@@ -164,25 +194,24 @@ export async function stopAllContainers(): Promise<void> {
 export async function runAgentSession(input: ContainerInput): Promise<ContainerOutput> {
   const { groupFolder, prompt, chatJid, isMain, providerID, modelID } = input
 
-  let hostPort: number
+  let agentName: string
   try {
-    hostPort = await getAgentPort(groupFolder)
+    agentName = await getAgentContainer(groupFolder)
   } catch (err) {
     logger.error({ groupFolder, err }, 'Failed to get agent container')
     return { status: 'error', result: null, error: String(err) }
   }
 
-  const client = createOpencodeClient({ baseUrl: `http://localhost:${hostPort}` })
+  const client = createOpencodeClient({ baseUrl: `http://${agentName}:${OPENCODE_PORT}` })
 
   // Resume existing session or create new one
   let sessionId = input.sessionId ?? getSession(groupFolder) ?? undefined
 
   try {
     if (sessionId) {
-      // Verify session still exists
-      try {
-        await client.session.get({ path: { id: sessionId } })
-      } catch {
+      // Verify session still exists (SDK doesn't throw by default — check .data)
+      const getRes = await client.session.get({ path: { id: sessionId } })
+      if (!getRes.data) {
         logger.info({ groupFolder, sessionId }, 'Session not found, creating new one')
         sessionId = undefined
       }
@@ -197,8 +226,8 @@ export async function runAgentSession(input: ContainerInput): Promise<ContainerO
       logger.info({ groupFolder, sessionId }, 'New OpenCode session created')
     }
 
-    // Send prompt
-    const result = await client.session.prompt({
+    // Fire prompt async (returns 204, not the assistant message)
+    const asyncRes = await client.session.promptAsync({
       path: { id: sessionId },
       body: {
         model: { providerID, modelID },
@@ -206,13 +235,60 @@ export async function runAgentSession(input: ContainerInput): Promise<ContainerO
       },
     })
 
-    const parts = result.data?.parts ?? []
-    const text = parts
-      .filter((p: { type: string; text?: string }) => p.type === 'text' && p.text)
-      .map((p: { type: string; text?: string }) => p.text)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    if ((asyncRes as any).error) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const e = (asyncRes as any).error
+      const errMsg = e?.data?.message ?? JSON.stringify(e)
+      logger.error({ groupFolder, sessionId, error: e }, 'promptAsync error')
+      return { status: 'error', result: null, error: errMsg }
+    }
+
+    // Poll session status until idle
+    const POLL_TIMEOUT = 120_000 // 2 min
+    const POLL_INTERVAL = 1_000
+    const deadline = Date.now() + POLL_TIMEOUT
+    while (Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, POLL_INTERVAL))
+      const statusRes = await client.session.status()
+      const sessionStatus = statusRes.data?.[sessionId]
+      const statusType = sessionStatus?.type
+      logger.info({ groupFolder, sessionId, statusType, allStatuses: statusRes.data }, 'Session status poll')
+      if (statusType === 'idle') break
+    }
+
+    // Fetch messages and find last assistant message
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const messagesRes = await client.session.messages({ path: { id: sessionId } }) as any
+    const messages: Array<{ info: { role: string; error?: unknown }; parts: Array<{ type: string; text?: string }> }> =
+      messagesRes.data ?? []
+
+    // Find last assistant message (in reverse)
+    const assistantMsg = [...messages].reverse().find((m) => m.info?.role === 'assistant')
+
+    if (!assistantMsg) {
+      logger.warn({ groupFolder, sessionId, messageCount: messages.length, roles: messages.map((m) => m.info?.role) }, 'No assistant message found after prompt')
+      return { status: 'error', result: null, error: 'No assistant message from OpenCode' }
+    }
+
+    // Check for model/auth error
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const msgError = (assistantMsg.info as any)?.error
+    if (msgError) {
+      const errMsg =
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (msgError as any)?.data?.message ?? JSON.stringify(msgError)
+      logger.error({ groupFolder, sessionId, msgError }, 'OpenCode model/auth error')
+      return { status: 'error', result: null, error: errMsg }
+    }
+
+    const text = (assistantMsg.parts ?? [])
+      .filter((p) => p.type === 'text' && p.text)
+      .map((p) => p.text)
       .join('')
 
     if (!text) {
+      logger.warn({ groupFolder, sessionId, parts: assistantMsg.parts }, 'Empty text from OpenCode')
       return { status: 'error', result: null, error: 'Empty response from OpenCode' }
     }
 
@@ -221,6 +297,24 @@ export async function runAgentSession(input: ContainerInput): Promise<ContainerO
     logger.error({ groupFolder, sessionId, err }, 'OpenCode session error')
     return { status: 'error', result: null, error: String(err) }
   }
+}
+
+/**
+ * Pre-warm agent containers for all registered groups so they're ready on first message.
+ */
+export async function warmUpContainers(groupFolders: string[]): Promise<void> {
+  if (groupFolders.length === 0) return
+  logger.info({ count: groupFolders.length }, 'Pre-warming agent containers')
+  await Promise.allSettled(
+    groupFolders.map(async (folder) => {
+      try {
+        await getAgentContainer(folder)
+        logger.info({ folder }, 'Agent container pre-warmed')
+      } catch (err) {
+        logger.warn({ folder, err }, 'Pre-warm failed — will retry on first message')
+      }
+    }),
+  )
 }
 
 /**

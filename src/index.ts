@@ -7,7 +7,7 @@ import {
   getChannelFactory,
   getRegisteredChannelNames,
 } from './channels/registry.js'
-import { stopAllContainers, runAgentSession } from './container-runner.js'
+import { stopAllContainers, runAgentSession, warmUpContainers } from './container-runner.js'
 import {
   getAllRegisteredGroups,
   getMessagesSince,
@@ -303,6 +303,10 @@ async function main(): Promise<void> {
 
   queue.setProcessMessagesFn(processGroupMessages)
   recoverPendingMessages()
+
+  // Pre-warm agent containers so they're ready on first message
+  const folders = Object.values(registeredGroups).map((g) => g.folder)
+  warmUpContainers(folders).catch((err) => logger.warn({ err }, 'Pre-warm error'))
 
   startMessageLoop().catch((err) => {
     logger.fatal({ err }, 'Message loop crashed')
