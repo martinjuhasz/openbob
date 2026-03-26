@@ -250,7 +250,7 @@ export async function runAgentSession(input: ContainerInput): Promise<ContainerO
 
   // Write context.json so the agent knows its own chatJid for IPC
   const contextFile = path.join(GROUPS_DIR, groupFolder, 'context.json')
-  fs.writeFileSync(contextFile, JSON.stringify({ chatJid, groupFolder }, null, 2))
+  fs.writeFileSync(contextFile, JSON.stringify({ chatJid, groupFolder, isMain }, null, 2))
 
   // Resume existing session or create new one
   let sessionId = input.sessionId ?? getSession(groupFolder) ?? undefined
@@ -260,8 +260,15 @@ export async function runAgentSession(input: ContainerInput): Promise<ContainerO
       // Verify session still exists (SDK doesn't throw by default — check .data)
       const getRes = await client.session.get({ path: { id: sessionId } })
       if (!getRes.data) {
-        logger.info({ groupFolder, sessionId }, 'Session not found, creating new one')
-        sessionId = undefined
+        // session.get may return empty if session not yet loaded into memory — try session.list
+        const listRes = await client.session.list().catch(() => null)
+        const found = (listRes?.data ?? []).find((s: { id: string }) => s.id === sessionId)
+        if (!found) {
+          logger.info({ groupFolder, sessionId }, 'Session not found in list, creating new one')
+          sessionId = undefined
+        } else {
+          logger.info({ groupFolder, sessionId }, 'Session found via list, reusing')
+        }
       }
     }
 
@@ -318,13 +325,25 @@ export async function runAgentSession(input: ContainerInput): Promise<ContainerO
     const POLL_TIMEOUT = 120_000 // 2 min
     const POLL_INTERVAL = 1_000
     const deadline = Date.now() + POLL_TIMEOUT
+    let missingFromStatusCount = 0
     while (Date.now() < deadline) {
       await new Promise((r) => setTimeout(r, POLL_INTERVAL))
       const statusRes = await client.session.status()
       const sessionStatus = statusRes.data?.[sessionId]
       const statusType = sessionStatus?.type
-      logger.info({ groupFolder, sessionId, statusType, allStatuses: statusRes.data }, 'Session status poll')
+      logger.info({ groupFolder, sessionId, statusType }, 'Session status poll')
       if (statusType === 'idle') break
+      if (statusType === undefined) {
+        // Session not in status map — either not started yet or already finished
+        missingFromStatusCount++
+        if (missingFromStatusCount >= 3) {
+          // Session never appeared in status — assume it finished or was lost
+          logger.warn({ groupFolder, sessionId }, 'Session missing from status map — assuming finished')
+          break
+        }
+      } else {
+        missingFromStatusCount = 0
+      }
     }
 
     // Fetch messages and find last assistant message

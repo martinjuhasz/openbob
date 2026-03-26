@@ -2,8 +2,12 @@
 // Host process connects via HTTP at port 4096
 
 import { createOpencodeServer } from '@opencode-ai/sdk'
+import { fileURLToPath } from 'url'
+import path from 'path'
 
 const PORT = parseInt(process.env['OPENCODE_PORT'] ?? '4096', 10)
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
+const mcpServerPath = path.join(__dirname, 'mcp-server.js')
 
 let server: { url: string; close(): void }
 try {
@@ -11,6 +15,14 @@ try {
     hostname: '0.0.0.0',
     port: PORT,
     timeout: 60_000,
+    config: {
+      mcp: {
+        yetaclaw: {
+          type: 'local',
+          command: ['node', mcpServerPath],
+        },
+      },
+    },
   })
 } catch (err) {
   const msg = err instanceof Error ? err.message : String(err)

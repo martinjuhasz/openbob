@@ -36,93 +36,28 @@ Read `/workspace/group/context.json` to find your chatJid:
 { "chatJid": "mm:abc123", "groupFolder": "admin" }
 ```
 
-## Sending Proactive Messages via IPC
+## Actions — MCP Tools
 
-Write a JSON file to `/workspace/ipc/messages/`:
-```bash
-cat > /workspace/ipc/messages/$(date +%s%N).json << 'EOF'
-{"type":"message","chatJid":"mm:CHANNEL_ID","text":"Your message here"}
-EOF
-```
+You have built-in tools for all actions. Use them directly — do not write bash or files.
 
-## Scheduling Tasks via IPC
+**send_message** — Send a message to the user immediately (while still working)
 
-Write a JSON file to `/workspace/ipc/tasks/`:
+**schedule_task** — Schedule a one-time or recurring task
+- `schedule_type`: `once` | `cron` | `interval`
+- `schedule_value`: ISO timestamp (no Z) | cron expr | milliseconds
+- `context_mode`: `group` (has chat history) | `isolated` (fresh session)
+- `target_group_jid`: (main only) send to another group
 
-**One-time:**
-```json
-{
-  "type": "schedule_task",
-  "prompt": "Send Martin a reminder about the meeting",
-  "scheduleType": "once",
-  "scheduleValue": "2026-03-25T15:00:00",
-  "contextMode": "group",
-  "targetJid": "mm:CHANNEL_ID"
-}
-```
+**cancel_task / pause_task / resume_task** — Manage scheduled tasks by `task_id`
 
-**Recurring (cron):**
-```json
-{
-  "type": "schedule_task",
-  "taskId": "daily-briefing",
-  "prompt": "Send a morning briefing",
-  "scheduleType": "cron",
-  "scheduleValue": "0 8 * * 1-5",
-  "contextMode": "isolated",
-  "targetJid": "mm:CHANNEL_ID"
-}
-```
+**register_group** (main group only) — Register a new Mattermost channel
+- `jid`: channel JID from the user, format `mm:<channel-id>`
+- `folder`: short slug, no spaces (e.g. "homebase")
+- `trigger`: word users type to address the bot (e.g. "winston")
+- `always_respond`: true = respond to every message, false = only on trigger word
+- Bot user must already be a member of the channel
 
-**Interval:**
-```json
-{
-  "type": "schedule_task",
-  "prompt": "Check for updates",
-  "scheduleType": "interval",
-  "scheduleValue": "300000",
-  "contextMode": "isolated",
-  "targetJid": "mm:CHANNEL_ID"
-}
-```
-
-**Cancel / Pause:**
-```json
-{ "type": "cancel_task", "taskId": "daily-briefing" }
-{ "type": "pause_task",  "taskId": "daily-briefing" }
-```
-
-**Register a new group (main group only):**
-```json
-{
-  "type": "register_group",
-  "jid": "mm:CHANNEL_ID",
-  "name": "Sales Team",
-  "folder": "sales",
-  "trigger": "winston",
-  "isMain": false,
-  "alwaysRespond": false
-}
-```
-- `alwaysRespond: true` → bot responds to every message (like main group)
-- `alwaysRespond: false` → bot only responds when trigger word is present (default)
-
-Active immediately — no restart needed. Bot user must already be a member of that channel in Mattermost.
-
-**Update an existing group (main group only):**
-```json
-{
-  "type": "update_group",
-  "jid": "mm:CHANNEL_ID",
-  "trigger": "newbot",
-  "alwaysRespond": true
-}
-```
-Only the fields you include are changed. Supported: `name`, `trigger`, `alwaysRespond`, `isMain`.
-
-Fields:
-- `scheduleType`: `cron` | `interval` (ms) | `once` (ISO timestamp, no Z suffix)
-- `contextMode`: `group` (has chat history) | `isolated` (fresh session — include all context in prompt)
+**update_group** (main group only) — Update trigger, name, or always_respond for an existing group
 
 ## Available Skills
 
