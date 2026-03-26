@@ -36,13 +36,14 @@ function createSchema(database: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_messages_chat ON messages(chat_jid, timestamp);
 
     CREATE TABLE IF NOT EXISTS registered_groups (
-      jid        TEXT PRIMARY KEY,
-      name       TEXT NOT NULL,
-      folder     TEXT NOT NULL UNIQUE,
-      trigger    TEXT NOT NULL,
-      channel    TEXT NOT NULL,
-      is_main    INTEGER DEFAULT 0,
-      created_at INTEGER NOT NULL
+      jid            TEXT PRIMARY KEY,
+      name           TEXT NOT NULL,
+      folder         TEXT NOT NULL UNIQUE,
+      trigger        TEXT NOT NULL,
+      channel        TEXT NOT NULL,
+      is_main        INTEGER DEFAULT 0,
+      always_respond INTEGER DEFAULT 0,
+      created_at     INTEGER NOT NULL
     );
 
     CREATE TABLE IF NOT EXISTS sessions (
@@ -77,6 +78,13 @@ export function initDatabase(): void {
   db = new Database(DB_PATH)
   db.pragma('journal_mode = WAL')
   createSchema(db)
+  // Migration: add always_respond column if missing (existing DBs)
+  const cols = (db.prepare(`PRAGMA table_info(registered_groups)`).all() as Array<{ name: string }>).map(c => c.name)
+  if (!cols.includes('always_respond')) {
+    db.prepare(`ALTER TABLE registered_groups ADD COLUMN always_respond INTEGER DEFAULT 0`).run()
+    // Backfill: groups that were main should always respond
+    db.prepare(`UPDATE registered_groups SET always_respond = is_main WHERE always_respond = 0`).run()
+  }
   logger.info({ dbPath: DB_PATH }, 'Database initialised')
 }
 
@@ -152,6 +160,7 @@ export function getAllRegisteredGroups(): Record<string, GroupConfig> {
     trigger: string
     channel: string
     is_main: number
+    always_respond: number
     created_at: number
   }>
   const result: Record<string, GroupConfig> = {}
@@ -163,6 +172,7 @@ export function getAllRegisteredGroups(): Record<string, GroupConfig> {
       trigger: row.trigger,
       channel: row.channel,
       isMain: row.is_main === 1,
+      alwaysRespond: row.always_respond === 1,
       createdAt: row.created_at,
     }
   }
@@ -171,14 +181,15 @@ export function getAllRegisteredGroups(): Record<string, GroupConfig> {
 
 export function setRegisteredGroup(config: GroupConfig): void {
   db.prepare(`
-    INSERT INTO registered_groups (jid, name, folder, trigger, channel, is_main, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO registered_groups (jid, name, folder, trigger, channel, is_main, always_respond, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(jid) DO UPDATE SET
-      name    = excluded.name,
-      folder  = excluded.folder,
-      trigger = excluded.trigger,
-      channel = excluded.channel,
-      is_main = excluded.is_main
+      name           = excluded.name,
+      folder         = excluded.folder,
+      trigger        = excluded.trigger,
+      channel        = excluded.channel,
+      is_main        = excluded.is_main,
+      always_respond = excluded.always_respond
   `).run(
     config.jid,
     config.name,
@@ -186,6 +197,7 @@ export function setRegisteredGroup(config: GroupConfig): void {
     config.trigger,
     config.channel,
     config.isMain ? 1 : 0,
+    config.alwaysRespond ? 1 : 0,
     config.createdAt,
   )
 }

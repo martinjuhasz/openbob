@@ -20,23 +20,27 @@ function makeGroup(overrides: Partial<GroupConfig> = {}): GroupConfig {
     trigger: 'yetaclaw',
     channel: 'mattermost',
     isMain: false,
+    alwaysRespond: false,
     createdAt: Date.now(),
     ...overrides,
   }
 }
 
-function makeDeps(groups: Record<string, GroupConfig> = {}): IpcDeps & { sent: string[], tasksChanged: number[], registered: GroupConfig[] } {
+function makeDeps(groups: Record<string, GroupConfig> = {}): IpcDeps & { sent: string[], tasksChanged: number[], registered: GroupConfig[], updated: GroupConfig[] } {
   const sent: string[] = []
   const tasksChanged: number[] = []
   const registered: GroupConfig[] = []
+  const updated: GroupConfig[] = []
   return {
     sent,
     tasksChanged,
     registered,
+    updated,
     sendMessage: async (_jid, text) => { sent.push(text) },
     registeredGroups: () => groups,
     onTasksChanged: () => { tasksChanged.push(1) },
     onGroupRegistered: (config) => { registered.push(config) },
+    onGroupUpdated: (config) => { updated.push(config) },
   }
 }
 
@@ -231,6 +235,47 @@ describe('processTaskIpc', () => {
         true,
         new Map(),
         deps,
+      )
+      expect(setRegisteredGroup).not.toHaveBeenCalled()
+    })
+
+    it('sets alwaysRespond from field', async () => {
+      const deps = makeDeps({})
+      await processTaskIpc(
+        { type: 'register_group', jid: 'mm:new', name: 'New', folder: 'new', trigger: 'w', alwaysRespond: true },
+        'main-group', true, new Map(), deps,
+      )
+      expect(deps.registered[0]?.alwaysRespond).toBe(true)
+    })
+  })
+
+  describe('update_group', () => {
+    it('updates trigger and alwaysRespond from main group', async () => {
+      const existing = { 'mm:abc': makeGroup({ jid: 'mm:abc', folder: 'grp' }) }
+      const deps = makeDeps(existing)
+      await processTaskIpc(
+        { type: 'update_group', jid: 'mm:abc', trigger: 'bot', alwaysRespond: true },
+        'main-group', true, new Map(), deps,
+      )
+      expect(setRegisteredGroup).toHaveBeenCalledOnce()
+      expect(deps.updated[0]).toMatchObject({ trigger: 'bot', alwaysRespond: true })
+    })
+
+    it('blocks update from non-main group', async () => {
+      const existing = { 'mm:abc': makeGroup() }
+      const deps = makeDeps(existing)
+      await processTaskIpc(
+        { type: 'update_group', jid: 'mm:abc', alwaysRespond: true },
+        'test-group', false, new Map(), deps,
+      )
+      expect(setRegisteredGroup).not.toHaveBeenCalled()
+    })
+
+    it('blocks update for unknown jid', async () => {
+      const deps = makeDeps({})
+      await processTaskIpc(
+        { type: 'update_group', jid: 'mm:unknown', alwaysRespond: true },
+        'main-group', true, new Map(), deps,
       )
       expect(setRegisteredGroup).not.toHaveBeenCalled()
     })

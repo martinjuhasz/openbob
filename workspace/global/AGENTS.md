@@ -100,10 +100,25 @@ Write a JSON file to `/workspace/ipc/tasks/`:
   "name": "Sales Team",
   "folder": "sales",
   "trigger": "winston",
-  "isMain": false
+  "isMain": false,
+  "alwaysRespond": false
 }
 ```
+- `alwaysRespond: true` → bot responds to every message (like main group)
+- `alwaysRespond: false` → bot only responds when trigger word is present (default)
+
 Active immediately — no restart needed. Bot user must already be a member of that channel in Mattermost.
+
+**Update an existing group (main group only):**
+```json
+{
+  "type": "update_group",
+  "jid": "mm:CHANNEL_ID",
+  "trigger": "newbot",
+  "alwaysRespond": true
+}
+```
+Only the fields you include are changed. Supported: `name`, `trigger`, `alwaysRespond`, `isMain`.
 
 Fields:
 - `scheduleType`: `cron` | `interval` (ms) | `once` (ISO timestamp, no Z suffix)

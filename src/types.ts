@@ -61,6 +61,7 @@ export interface GroupConfig {
   trigger: string
   channel: string
   isMain: boolean
+  alwaysRespond: boolean
   createdAt: number
 }
 

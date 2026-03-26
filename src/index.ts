@@ -74,8 +74,8 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   if (missedMessages.length === 0) return true
 
-  // Non-main groups: only act when trigger word present
-  if (!group.isMain) {
+  // Only respond to all messages if alwaysRespond is set; otherwise require trigger
+  if (!group.alwaysRespond) {
     const hasTrigger = checkTrigger(missedMessages, group.trigger)
     if (!hasTrigger) return true
   }
@@ -170,8 +170,8 @@ async function startMessageLoop(): Promise<void> {
             const group = registeredGroups[chatJid]
             if (!group) continue
 
-            // Non-main: only enqueue if trigger present in new messages
-            if (!group.isMain) {
+            // Only enqueue if alwaysRespond or trigger word present
+            if (!group.alwaysRespond) {
               const hasTrigger = checkTrigger(groupMessages, group.trigger)
               if (!hasTrigger) continue
             }
@@ -210,13 +210,15 @@ function registerInitialGroupFromEnv(): void {
     return
   }
 
+  const isMain = process.env['INITIAL_GROUP_IS_MAIN'] !== 'false'
   const config: GroupConfig = {
     jid,
     name: process.env['INITIAL_GROUP_NAME'] ?? 'Main',
     folder: process.env['INITIAL_GROUP_FOLDER'] ?? 'main',
     trigger: process.env['INITIAL_GROUP_TRIGGER'] ?? ASSISTANT_NAME,
     channel: 'mattermost',
-    isMain: process.env['INITIAL_GROUP_IS_MAIN'] !== 'false',
+    isMain,
+    alwaysRespond: process.env['INITIAL_GROUP_ALWAYS_RESPOND'] === 'true' || isMain,
     createdAt: Date.now(),
   }
   setRegisteredGroup(config)
@@ -305,6 +307,10 @@ async function main(): Promise<void> {
       warmUpContainers([config.folder]).catch((err) =>
         logger.warn({ folder: config.folder, err }, 'Pre-warm failed for new group'),
       )
+    },
+    onGroupUpdated: (config) => {
+      registeredGroups[config.jid] = config
+      logger.info({ jid: config.jid, name: config.name }, 'Group updated at runtime')
     },
   })
 

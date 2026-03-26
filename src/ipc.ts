@@ -21,6 +21,7 @@ export interface IpcDeps {
   registeredGroups: () => Record<string, GroupConfig>
   onTasksChanged: () => void
   onGroupRegistered: (config: GroupConfig) => void
+  onGroupUpdated: (config: GroupConfig) => void
 }
 
 let ipcWatcherRunning = false
@@ -156,12 +157,13 @@ export async function processTaskIpc(
     scheduleValue?: string
     contextMode?: string
     targetJid?: string
-    // register_group fields
+    // register_group / update_group fields
     jid?: string
     name?: string
     folder?: string
     trigger?: string
     isMain?: boolean
+    alwaysRespond?: boolean
   },
   sourceGroup: string,
   isMain: boolean,
@@ -316,11 +318,40 @@ export async function processTaskIpc(
         trigger: data.trigger,
         channel: data.jid.split(':')[0] ?? 'mattermost',
         isMain: data.isMain === true,
+        alwaysRespond: data.alwaysRespond === true || data.isMain === true,
         createdAt: Date.now(),
       }
       setRegisteredGroup(config)
       deps.onGroupRegistered(config)
       logger.info({ jid: data.jid, name: data.name, folder: data.folder }, 'Group registered via IPC')
+      break
+    }
+
+    case 'update_group': {
+      if (!isMain) {
+        logger.warn({ sourceGroup }, 'update_group: only main group is allowed')
+        break
+      }
+      if (!data.jid) {
+        logger.warn({ sourceGroup }, 'update_group: missing jid')
+        break
+      }
+      const existing = deps.registeredGroups()
+      const group = existing[data.jid]
+      if (!group) {
+        logger.warn({ jid: data.jid }, 'update_group: group not found')
+        break
+      }
+      const updated: GroupConfig = {
+        ...group,
+        ...(data.name !== undefined && { name: data.name }),
+        ...(data.trigger !== undefined && { trigger: data.trigger }),
+        ...(data.alwaysRespond !== undefined && { alwaysRespond: data.alwaysRespond }),
+        ...(data.isMain !== undefined && { isMain: data.isMain }),
+      }
+      setRegisteredGroup(updated)
+      deps.onGroupUpdated(updated)
+      logger.info({ jid: data.jid, changes: { name: data.name, trigger: data.trigger, alwaysRespond: data.alwaysRespond } }, 'Group updated via IPC')
       break
     }
 
