@@ -89,13 +89,17 @@ async function spawnContainer(groupFolder: string): Promise<string> {
   fs.chmodSync(opencodeDir, 0o777)
 
   // Compute host-side paths for workspace and skills mounts
+  // WORKSPACE_PATH_HOST = actual host path for /workspace inside this container
+  // Layout: /workspace/groups/<folder>  and  /workspace/global  (NOT /workspace/groups/global)
   const groupDirHost = WORKSPACE_PATH_HOST
     ? path.join(WORKSPACE_PATH_HOST, 'groups', groupFolder)
     : null
   const globalDirHost = WORKSPACE_PATH_HOST
-    ? path.join(WORKSPACE_PATH_HOST, 'groups', 'global')
+    ? path.join(WORKSPACE_PATH_HOST, 'global')
     : null
   const agentsMdHost = globalDirHost ? path.join(globalDirHost, 'AGENTS.md') : null
+  // IPC dir: lives under /data in the host container → use DATA_PATH_HOST for docker run mount
+  const ipcDirHost = `${DATA_PATH_HOST}/ipc/${groupFolder}`
 
   // No port publish needed — host connects via Docker network using container name
   // Note: no --rm so we can fetch logs on crash; containers are cleaned up in spawnContainer
@@ -109,13 +113,13 @@ async function spawnContainer(groupFolder: string): Promise<string> {
     '-v', `${DATA_PATH_HOST}:/data`,
     // Workspace mounts (only if host paths resolved)
     ...(groupDirHost ? ['-v', `${groupDirHost}:/workspace/group`] : []),
-    ...(globalDirHost && fs.existsSync(path.join(GROUPS_DIR, 'global')) ? [
+    ...(globalDirHost && fs.existsSync(path.join(DATA_DIR, '..', 'workspace', 'global')) ? [
       '-v', `${globalDirHost}:/workspace/global:ro`,
     ] : []),
-    ...(agentsMdHost && fs.existsSync(path.join(GROUPS_DIR, 'global', 'AGENTS.md')) ? [
+    ...(agentsMdHost && fs.existsSync('/workspace/global/AGENTS.md') ? [
       '-v', `${agentsMdHost}:/workspace/AGENTS.md:ro`,
     ] : []),
-    '-v', `${ipcDir}:/workspace/ipc`,
+    '-v', `${ipcDirHost}:/workspace/ipc`,
     // Skills — read-only, shared across all agent containers
     ...(SKILLS_PATH_HOST ? ['-v', `${SKILLS_PATH_HOST}:/skills:ro`] : []),
     // Labels for cleanup
@@ -268,6 +272,28 @@ export async function runAgentSession(input: ContainerInput): Promise<ContainerO
       sessionId = session.data!.id as string
       setSession(groupFolder, sessionId)
       logger.info({ groupFolder, sessionId }, 'New OpenCode session created')
+    }
+
+    // If the session is still busy from a previous interrupted run, wait briefly then abandon
+    {
+      const preStatus = await client.session.status().catch(() => null)
+      if ((preStatus?.data as any)?.[sessionId]?.type === 'busy') {
+        logger.warn({ groupFolder, sessionId }, 'Session still busy before prompt — waiting up to 10s')
+        const busyDeadline = Date.now() + 10_000
+        while (Date.now() < busyDeadline) {
+          await new Promise((r) => setTimeout(r, 1_000))
+          const s = await client.session.status().catch(() => null)
+          if ((s?.data as any)?.[sessionId]?.type !== 'busy') break
+        }
+        const stillBusy = ((await client.session.status().catch(() => null))?.data as any)?.[sessionId]?.type === 'busy'
+        if (stillBusy) {
+          logger.warn({ groupFolder, sessionId }, 'Session still busy after wait — creating new session')
+          const newRes = await client.session.create({ body: { title: `${groupFolder}/${chatJid}` } })
+          sessionId = newRes.data!.id as string
+          setSession(groupFolder, sessionId)
+          logger.info({ groupFolder, sessionId }, 'New session created after stale busy')
+        }
+      }
     }
 
     // Fire prompt async (returns 204, not the assistant message)
