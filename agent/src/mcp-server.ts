@@ -248,6 +248,175 @@ server.tool(
 );
 
 server.tool(
+  'list_tasks',
+  `List all scheduled tasks. Returns task ID, prompt, schedule, status, and next run time.
+Main group sees all tasks across groups; other groups see only their own.`,
+  {},
+  async () => {
+    const ctx = readContext();
+    const requestId = `req-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+    writeIpcFile(TASKS_DIR, {
+      type: 'list_tasks',
+      requestId,
+      groupFolder: ctx.groupFolder,
+      timestamp: new Date().toISOString(),
+    });
+
+    // Poll for response from host
+    const responsePath = path.join(IPC_DIR, 'input', `${requestId}.json`);
+    const deadline = Date.now() + 10_000;
+    while (Date.now() < deadline) {
+      try {
+        const raw = fs.readFileSync(responsePath, 'utf-8');
+        fs.unlinkSync(responsePath);
+        const data = JSON.parse(raw) as {
+          tasks: Array<{
+            id: string;
+            jid: string;
+            group_folder: string;
+            prompt: string;
+            schedule_type: string;
+            schedule_value: string;
+            context_mode: string;
+            status: string;
+            next_run: number;
+            created_at: number;
+            created_by: string;
+          }>;
+        };
+        if (data.tasks.length === 0) {
+          return {
+            content: [{ type: 'text' as const, text: 'No scheduled tasks.' }],
+          };
+        }
+        const lines = data.tasks.map((t) => {
+          const next = t.next_run ? new Date(t.next_run).toISOString() : 'n/a';
+          return [
+            `ID: ${t.id}`,
+            `  Group: ${t.group_folder}`,
+            `  Status: ${t.status}`,
+            `  Schedule: ${t.schedule_type} — ${t.schedule_value}`,
+            `  Context: ${t.context_mode}`,
+            `  Next run: ${next}`,
+            `  Prompt: ${t.prompt.length > 120 ? t.prompt.slice(0, 120) + '…' : t.prompt}`,
+          ].join('\n');
+        });
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: `${data.tasks.length} task(s):\n\n${lines.join('\n\n')}`,
+            },
+          ],
+        };
+      } catch {
+        await new Promise((r) => setTimeout(r, 250));
+      }
+    }
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: 'Timeout waiting for task list from host.',
+        },
+      ],
+      isError: true,
+    };
+  },
+);
+
+server.tool(
+  'update_task',
+  `Update an existing scheduled task. Only provide the fields you want to change.
+If you change schedule_type, you must also provide a matching schedule_value.`,
+  {
+    task_id: z.string().describe('ID of the task to update'),
+    prompt: z
+      .string()
+      .optional()
+      .describe('New prompt/instructions for the task'),
+    schedule_type: z
+      .enum(['cron', 'interval', 'once'])
+      .optional()
+      .describe('New schedule type'),
+    schedule_value: z
+      .string()
+      .optional()
+      .describe(
+        'New schedule value (cron expression, ms interval, or local timestamp)',
+      ),
+    context_mode: z
+      .enum(['group', 'isolated'])
+      .optional()
+      .describe('New context mode'),
+  },
+  async (args: {
+    task_id: string;
+    prompt?: string;
+    schedule_type?: 'cron' | 'interval' | 'once';
+    schedule_value?: string;
+    context_mode?: 'group' | 'isolated';
+  }) => {
+    // Validate schedule_value if schedule_type is provided
+    if (args.schedule_type === 'cron' && args.schedule_value) {
+      try {
+        CronExpressionParser.parse(args.schedule_value);
+      } catch {
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: `Invalid cron: "${args.schedule_value}"`,
+            },
+          ],
+          isError: true,
+        };
+      }
+    } else if (args.schedule_type === 'interval' && args.schedule_value) {
+      const ms = parseInt(args.schedule_value, 10);
+      if (isNaN(ms) || ms <= 0) {
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: `Invalid interval: "${args.schedule_value}". Use milliseconds.`,
+            },
+          ],
+          isError: true,
+        };
+      }
+    }
+
+    const ctx = readContext();
+    writeIpcFile(TASKS_DIR, {
+      type: 'update_task',
+      taskId: args.task_id,
+      ...(args.prompt !== undefined && { prompt: args.prompt }),
+      ...(args.schedule_type !== undefined && {
+        scheduleType: args.schedule_type,
+      }),
+      ...(args.schedule_value !== undefined && {
+        scheduleValue: args.schedule_value,
+      }),
+      ...(args.context_mode !== undefined && {
+        contextMode: args.context_mode,
+      }),
+      groupFolder: ctx.groupFolder,
+      timestamp: new Date().toISOString(),
+    });
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: `Task ${args.task_id} update submitted.`,
+        },
+      ],
+    };
+  },
+);
+
+server.tool(
   'register_group',
   `Register a new chat/group so the bot can respond to messages there. Main group only.
 

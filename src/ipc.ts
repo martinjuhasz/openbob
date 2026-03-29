@@ -10,8 +10,11 @@ import { DATA_DIR, POLL_INTERVAL } from './config.js';
 import {
   deleteTask,
   getActiveTasks,
+  getAllTasks,
   getTaskById,
+  getTasksForGroup,
   setRegisteredGroup,
+  updateTask,
   upsertTask,
 } from './db.js';
 import { logger } from './logger.js';
@@ -173,6 +176,8 @@ export async function processTaskIpc(
     scheduleValue?: string;
     contextMode?: string;
     targetJid?: string;
+    // list_tasks request-response
+    requestId?: string;
     // register_group / update_group fields
     jid?: string;
     name?: string;
@@ -367,6 +372,100 @@ export async function processTaskIpc(
           'Unauthorized task resume attempt or task not found/not paused',
         );
       }
+      break;
+    }
+
+    case 'list_tasks': {
+      if (!data.requestId) break;
+      const tasks = isMain ? getAllTasks() : getTasksForGroup(sourceGroup);
+      const responseDir = path.join(DATA_DIR, 'ipc', sourceGroup, 'input');
+      fs.mkdirSync(responseDir, { recursive: true });
+      const responsePath = path.join(responseDir, `${data.requestId}.json`);
+      const tempPath = `${responsePath}.tmp`;
+      fs.writeFileSync(tempPath, JSON.stringify({ tasks }));
+      fs.renameSync(tempPath, responsePath);
+      logger.debug(
+        { sourceGroup, requestId: data.requestId, count: tasks.length },
+        'list_tasks response written',
+      );
+      break;
+    }
+
+    case 'update_task': {
+      if (!data.taskId) break;
+      const task = getTaskById(data.taskId);
+      if (!task) {
+        logger.warn(
+          { taskId: data.taskId, sourceGroup },
+          'update_task: task not found',
+        );
+        break;
+      }
+      if (!isMain && task.group_folder !== sourceGroup) {
+        logger.warn(
+          { taskId: data.taskId, sourceGroup },
+          'Unauthorized update_task attempt',
+        );
+        break;
+      }
+
+      const fields: Parameters<typeof updateTask>[1] = {};
+      if (data.prompt !== undefined) fields.prompt = data.prompt;
+      if (data.contextMode === 'group' || data.contextMode === 'isolated') {
+        fields.context_mode = data.contextMode;
+      }
+
+      // Handle schedule changes
+      const newType =
+        (data.scheduleType as ScheduledTask['schedule_type']) ??
+        task.schedule_type;
+      const newValue = data.scheduleValue ?? task.schedule_value;
+      if (data.scheduleType !== undefined) fields.schedule_type = newType;
+      if (data.scheduleValue !== undefined) fields.schedule_value = newValue;
+
+      // Recalculate next_run if schedule changed
+      if (data.scheduleType !== undefined || data.scheduleValue !== undefined) {
+        const now = Date.now();
+        if (newType === 'cron') {
+          try {
+            const interval = CronExpressionParser.parse(newValue);
+            fields.next_run = interval.next().getTime();
+          } catch {
+            logger.warn(
+              { taskId: data.taskId, scheduleValue: newValue },
+              'update_task: invalid cron expression',
+            );
+            break;
+          }
+        } else if (newType === 'interval') {
+          const ms = parseInt(newValue, 10);
+          if (isNaN(ms) || ms <= 0) {
+            logger.warn(
+              { taskId: data.taskId, scheduleValue: newValue },
+              'update_task: invalid interval',
+            );
+            break;
+          }
+          fields.next_run = now + ms;
+        } else if (newType === 'once') {
+          const date = new Date(newValue);
+          if (isNaN(date.getTime())) {
+            logger.warn(
+              { taskId: data.taskId, scheduleValue: newValue },
+              'update_task: invalid timestamp',
+            );
+            break;
+          }
+          fields.next_run = date.getTime();
+        }
+      }
+
+      updateTask(data.taskId, fields);
+      logger.info(
+        { taskId: data.taskId, sourceGroup, fields },
+        'Task updated via IPC',
+      );
+      deps.onTasksChanged();
       break;
     }
 

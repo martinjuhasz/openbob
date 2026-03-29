@@ -287,6 +287,20 @@ export function getTaskById(id: string): ScheduledTask | undefined {
     | undefined;
 }
 
+export function getTasksForGroup(groupFolder: string): ScheduledTask[] {
+  return db
+    .prepare(
+      `SELECT * FROM scheduled_tasks WHERE group_folder = ? ORDER BY created_at DESC`,
+    )
+    .all(groupFolder) as ScheduledTask[];
+}
+
+export function getAllTasks(): ScheduledTask[] {
+  return db
+    .prepare(`SELECT * FROM scheduled_tasks ORDER BY created_at DESC`)
+    .all() as ScheduledTask[];
+}
+
 export function upsertTask(task: ScheduledTask): void {
   db.prepare(
     `
@@ -313,4 +327,51 @@ export function upsertTask(task: ScheduledTask): void {
 
 export function deleteTask(id: string): void {
   db.prepare(`DELETE FROM scheduled_tasks WHERE id = ?`).run(id);
+}
+
+export function updateTask(
+  id: string,
+  fields: Partial<
+    Pick<
+      ScheduledTask,
+      | 'prompt'
+      | 'schedule_type'
+      | 'schedule_value'
+      | 'context_mode'
+      | 'status'
+      | 'next_run'
+    >
+  >,
+): void {
+  const sets: string[] = [];
+  const values: unknown[] = [];
+  if (fields.prompt !== undefined) {
+    sets.push('prompt = ?');
+    values.push(fields.prompt);
+  }
+  if (fields.schedule_type !== undefined) {
+    sets.push('schedule_type = ?');
+    values.push(fields.schedule_type);
+  }
+  if (fields.schedule_value !== undefined) {
+    sets.push('schedule_value = ?');
+    values.push(fields.schedule_value);
+  }
+  if (fields.context_mode !== undefined) {
+    sets.push('context_mode = ?');
+    values.push(fields.context_mode);
+  }
+  if (fields.status !== undefined) {
+    sets.push('status = ?');
+    values.push(fields.status);
+  }
+  if (fields.next_run !== undefined) {
+    sets.push('next_run = ?');
+    values.push(fields.next_run);
+  }
+  if (sets.length === 0) return;
+  values.push(id);
+  db.prepare(`UPDATE scheduled_tasks SET ${sets.join(', ')} WHERE id = ?`).run(
+    ...values,
+  );
 }
