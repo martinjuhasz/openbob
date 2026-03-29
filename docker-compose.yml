@@ -35,8 +35,11 @@ services:
       - INITIAL_GROUP_FOLDER=${INITIAL_GROUP_FOLDER:-main}
       - INITIAL_GROUP_TRIGGER=${INITIAL_GROUP_TRIGGER:-yetaclaw}
       - INITIAL_GROUP_IS_MAIN=${INITIAL_GROUP_IS_MAIN:-true}
+      # OpenViking memory — only active when profile=memory
+      - OPENVIKING_URL=${OPENVIKING_URL:-}
+      - OPENVIKING_MEMORY_SCOPE=${OPENVIKING_MEMORY_SCOPE:-shared}
+      - OPENVIKING_API_KEY=${OPENVIKING_API_KEY:-yetaclaw-local}
       # Optional
-      - OPENVIKING_URL=http://openviking:1933
       - LOG_LEVEL=${LOG_LEVEL:-info}
     networks:
       - yetaclaw
@@ -60,9 +63,16 @@ services:
     image: yetaclaw-openviking:latest
     container_name: yetaclaw-openviking
     restart: unless-stopped
+    ports:
+      - "1933:1933"                                  # API
+      - "8020:8020"                                  # Web console: http://localhost:8020
     volumes:
       - ${DATA_PATH}/openviking:/data
-      - ./openviking/ov.conf:/app/ov.conf:ro
+    environment:
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - OPENVIKING_LLM_MODEL=${OPENVIKING_LLM_MODEL:-openai/gpt-4o-mini}
+      - OPENVIKING_API_KEY=${OPENVIKING_API_KEY:-yetaclaw-local}
+      - OPENVIKING_CONSOLE=${OPENVIKING_CONSOLE:-1}
     networks:
       - yetaclaw
     profiles:

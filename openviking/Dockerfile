@@ -10,7 +10,8 @@ RUN pip install --no-cache-dir openviking
 
 WORKDIR /app
 
-COPY ov.conf ./
+COPY entrypoint.sh ./
+RUN chmod +x /app/entrypoint.sh
 
 RUN mkdir -p /data
 
@@ -19,4 +20,4 @@ EXPOSE 1933
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
   CMD curl -f http://localhost:1933/health || exit 1
 
-CMD ["python", "-m", "openviking.server", "--config", "/app/ov.conf", "--port", "1933"]
+CMD ["/app/entrypoint.sh"]

@@ -1,14 +1,14 @@
 // SQLite database — messages, groups, sessions, tasks
 
-import Database from 'better-sqlite3'
-import fs from 'fs'
-import path from 'path'
+import Database from 'better-sqlite3';
+import fs from 'fs';
+import path from 'path';
 
-import { DB_PATH } from './config.js'
-import { logger } from './logger.js'
-import { GroupConfig, NewMessage, ScheduledTask } from './types.js'
+import { DB_PATH } from './config.js';
+import { logger } from './logger.js';
+import { GroupConfig, NewMessage, ScheduledTask } from './types.js';
 
-let db: Database.Database
+let db: Database.Database;
 
 function createSchema(database: Database.Database): void {
   database.exec(`
@@ -43,6 +43,7 @@ function createSchema(database: Database.Database): void {
       channel        TEXT NOT NULL,
       is_main        INTEGER DEFAULT 0,
       always_respond INTEGER DEFAULT 0,
+      model          TEXT,
       created_at     INTEGER NOT NULL
     );
 
@@ -70,31 +71,45 @@ function createSchema(database: Database.Database): void {
       created_by     TEXT NOT NULL DEFAULT ''
     );
     CREATE INDEX IF NOT EXISTS idx_tasks_next_run ON scheduled_tasks(next_run, status);
-  `)
+  `);
 }
 
 export function initDatabase(): void {
-  fs.mkdirSync(path.dirname(DB_PATH), { recursive: true })
-  db = new Database(DB_PATH)
-  db.pragma('journal_mode = WAL')
-  createSchema(db)
+  fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
+  db = new Database(DB_PATH);
+  db.pragma('journal_mode = WAL');
+  createSchema(db);
   // Migration: add always_respond column if missing (existing DBs)
-  const cols = (db.prepare(`PRAGMA table_info(registered_groups)`).all() as Array<{ name: string }>).map(c => c.name)
+  const cols = (
+    db.prepare(`PRAGMA table_info(registered_groups)`).all() as Array<{
+      name: string;
+    }>
+  ).map((c) => c.name);
   if (!cols.includes('always_respond')) {
-    db.prepare(`ALTER TABLE registered_groups ADD COLUMN always_respond INTEGER DEFAULT 0`).run()
+    db.prepare(
+      `ALTER TABLE registered_groups ADD COLUMN always_respond INTEGER DEFAULT 0`,
+    ).run();
     // Backfill: groups that were main should always respond
-    db.prepare(`UPDATE registered_groups SET always_respond = is_main WHERE always_respond = 0`).run()
+    db.prepare(
+      `UPDATE registered_groups SET always_respond = is_main WHERE always_respond = 0`,
+    ).run();
   }
-  logger.info({ dbPath: DB_PATH }, 'Database initialised')
+  // Migration: add model column if missing (existing DBs)
+  if (!cols.includes('model')) {
+    db.prepare(`ALTER TABLE registered_groups ADD COLUMN model TEXT`).run();
+  }
+  logger.info({ dbPath: DB_PATH }, 'Database initialised');
 }
 
 // --- Messages ---
 
 export function storeMessage(msg: NewMessage): void {
-  db.prepare(`
+  db.prepare(
+    `
     INSERT OR IGNORE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
+  `,
+  ).run(
     msg.id,
     msg.chat_jid,
     msg.sender,
@@ -103,7 +118,7 @@ export function storeMessage(msg: NewMessage): void {
     msg.timestamp,
     msg.is_from_me ? 1 : 0,
     msg.is_bot_message ? 1 : 0,
-  )
+  );
 }
 
 export function getRecentMessages(chatJid: string, limit = 20): NewMessage[] {
@@ -113,21 +128,27 @@ export function getRecentMessages(chatJid: string, limit = 20): NewMessage[] {
         `SELECT * FROM messages WHERE chat_jid = ? ORDER BY timestamp DESC LIMIT ?`,
       )
       .all(chatJid, limit) as NewMessage[]
-  ).reverse()
+  ).reverse();
 }
 
-export function getMessagesSince(chatJid: string, since: string, limit = 50): NewMessage[] {
+export function getMessagesSince(
+  chatJid: string,
+  since: string,
+  limit = 50,
+): NewMessage[] {
   return db
     .prepare(
       `SELECT * FROM messages WHERE chat_jid = ? AND timestamp > ? ORDER BY timestamp ASC LIMIT ?`,
     )
-    .all(chatJid, since, limit) as NewMessage[]
+    .all(chatJid, since, limit) as NewMessage[];
 }
 
 export function getNewMessages(since: string): NewMessage[] {
   return db
-    .prepare(`SELECT * FROM messages WHERE timestamp > ? ORDER BY timestamp ASC`)
-    .all(since) as NewMessage[]
+    .prepare(
+      `SELECT * FROM messages WHERE timestamp > ? ORDER BY timestamp ASC`,
+    )
+    .all(since) as NewMessage[];
 }
 
 // --- Chat metadata ---
@@ -139,7 +160,8 @@ export function storeChatMetadata(
   channel?: string,
   isGroup?: boolean,
 ): void {
-  db.prepare(`
+  db.prepare(
+    `
     INSERT INTO chats (jid, name, channel, is_group, last_message_time)
     VALUES (?, ?, ?, ?, ?)
     ON CONFLICT(jid) DO UPDATE SET
@@ -147,23 +169,25 @@ export function storeChatMetadata(
       name    = COALESCE(excluded.name, chats.name),
       channel = COALESCE(excluded.channel, chats.channel),
       is_group = COALESCE(excluded.is_group, chats.is_group)
-  `).run(jid, name ?? null, channel ?? null, isGroup ? 1 : 0, lastMessageTime)
+  `,
+  ).run(jid, name ?? null, channel ?? null, isGroup ? 1 : 0, lastMessageTime);
 }
 
 // --- Registered groups ---
 
 export function getAllRegisteredGroups(): Record<string, GroupConfig> {
   const rows = db.prepare(`SELECT * FROM registered_groups`).all() as Array<{
-    jid: string
-    name: string
-    folder: string
-    trigger: string
-    channel: string
-    is_main: number
-    always_respond: number
-    created_at: number
-  }>
-  const result: Record<string, GroupConfig> = {}
+    jid: string;
+    name: string;
+    folder: string;
+    trigger: string;
+    channel: string;
+    is_main: number;
+    always_respond: number;
+    model: string | null;
+    created_at: number;
+  }>;
+  const result: Record<string, GroupConfig> = {};
   for (const row of rows) {
     result[row.jid] = {
       jid: row.jid,
@@ -173,24 +197,28 @@ export function getAllRegisteredGroups(): Record<string, GroupConfig> {
       channel: row.channel,
       isMain: row.is_main === 1,
       alwaysRespond: row.always_respond === 1,
+      model: row.model ?? undefined,
       createdAt: row.created_at,
-    }
+    };
   }
-  return result
+  return result;
 }
 
 export function setRegisteredGroup(config: GroupConfig): void {
-  db.prepare(`
-    INSERT INTO registered_groups (jid, name, folder, trigger, channel, is_main, always_respond, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  db.prepare(
+    `
+    INSERT INTO registered_groups (jid, name, folder, trigger, channel, is_main, always_respond, model, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(jid) DO UPDATE SET
       name           = excluded.name,
       folder         = excluded.folder,
       trigger        = excluded.trigger,
       channel        = excluded.channel,
       is_main        = excluded.is_main,
-      always_respond = excluded.always_respond
-  `).run(
+      always_respond = excluded.always_respond,
+      model          = excluded.model
+  `,
+  ).run(
     config.jid,
     config.name,
     config.folder,
@@ -198,12 +226,13 @@ export function setRegisteredGroup(config: GroupConfig): void {
     config.channel,
     config.isMain ? 1 : 0,
     config.alwaysRespond ? 1 : 0,
+    config.model ?? null,
     config.createdAt,
-  )
+  );
 }
 
 export function deleteRegisteredGroup(jid: string): void {
-  db.prepare(`DELETE FROM registered_groups WHERE jid = ?`).run(jid)
+  db.prepare(`DELETE FROM registered_groups WHERE jid = ?`).run(jid);
 }
 
 // --- Sessions ---
@@ -211,15 +240,17 @@ export function deleteRegisteredGroup(jid: string): void {
 export function getSession(groupFolder: string): string | null {
   const row = db
     .prepare(`SELECT session_id FROM sessions WHERE group_folder = ?`)
-    .get(groupFolder) as { session_id: string } | undefined
-  return row?.session_id ?? null
+    .get(groupFolder) as { session_id: string } | undefined;
+  return row?.session_id ?? null;
 }
 
 export function setSession(groupFolder: string, sessionId: string): void {
-  db.prepare(`
+  db.prepare(
+    `
     INSERT INTO sessions (group_folder, session_id) VALUES (?, ?)
     ON CONFLICT(group_folder) DO UPDATE SET session_id = excluded.session_id
-  `).run(groupFolder, sessionId)
+  `,
+  ).run(groupFolder, sessionId);
 }
 
 // --- Router state ---
@@ -227,33 +258,39 @@ export function setSession(groupFolder: string, sessionId: string): void {
 export function getRouterState(key: string): string | null {
   const row = db
     .prepare(`SELECT value FROM router_state WHERE key = ?`)
-    .get(key) as { value: string } | undefined
-  return row?.value ?? null
+    .get(key) as { value: string } | undefined;
+  return row?.value ?? null;
 }
 
 export function setRouterState(key: string, value: string): void {
-  db.prepare(`
+  db.prepare(
+    `
     INSERT INTO router_state (key, value) VALUES (?, ?)
     ON CONFLICT(key) DO UPDATE SET value = excluded.value
-  `).run(key, value)
+  `,
+  ).run(key, value);
 }
 
 // --- Scheduled tasks ---
 
 export function getActiveTasks(): ScheduledTask[] {
   return db
-    .prepare(`SELECT * FROM scheduled_tasks WHERE status = 'active' ORDER BY next_run ASC`)
-    .all() as ScheduledTask[]
+    .prepare(
+      `SELECT * FROM scheduled_tasks WHERE status = 'active' ORDER BY next_run ASC`,
+    )
+    .all() as ScheduledTask[];
 }
 
 export function upsertTask(task: ScheduledTask): void {
-  db.prepare(`
+  db.prepare(
+    `
     INSERT INTO scheduled_tasks (id, jid, group_folder, prompt, schedule_type, schedule_value, context_mode, status, next_run, created_at, created_by)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       status   = excluded.status,
       next_run = excluded.next_run
-  `).run(
+  `,
+  ).run(
     task.id,
     task.jid,
     task.groupFolder,
@@ -265,9 +302,9 @@ export function upsertTask(task: ScheduledTask): void {
     task.nextRun,
     task.createdAt,
     task.createdBy,
-  )
+  );
 }
 
 export function deleteTask(id: string): void {
-  db.prepare(`DELETE FROM scheduled_tasks WHERE id = ?`).run(id)
+  db.prepare(`DELETE FROM scheduled_tasks WHERE id = ?`).run(id);
 }
