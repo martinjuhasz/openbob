@@ -8,7 +8,6 @@ vi.mock('./config.js', () => ({
   GROUPS_DIR: '/tmp/yetaclaw-groups',
   DB_PATH: ':memory:',
   POLL_INTERVAL: 2000,
-  IDLE_TIMEOUT: 600000,
   ASSISTANT_NAME: 'yetaclaw',
 }));
 

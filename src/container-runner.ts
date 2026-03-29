@@ -114,8 +114,8 @@ async function resolveHostPaths(): Promise<void> {
 }
 
 const OPENCODE_PORT = 4096;
-const SERVER_READY_TIMEOUT = 30_000; // 30s
 const SERVER_POLL_INTERVAL = 500; // 0.5s
+const RESPONSE_POLL_INTERVAL = 1_000; // 1s
 
 // Track running containers per group: folder → name
 const activeContainers = new Map<string, string>();
@@ -123,6 +123,52 @@ const activeContainers = new Map<string, string>();
 const containerModels = new Map<string, string>();
 // Deduplicate concurrent spawn calls for the same group
 const spawnInProgress = new Map<string, Promise<string>>();
+// Track last activity time per container for idle timeout: folder → timestamp (ms)
+const lastActivity = new Map<string, number>();
+
+/** Update the last-activity timestamp for a group's container. */
+function touchContainer(groupFolder: string): void {
+  lastActivity.set(groupFolder, Date.now());
+}
+
+let idleCheckerRunning = false;
+
+/**
+ * Start the idle-timeout checker loop.
+ * If IDLE_TIMEOUT is set, periodically stops containers that haven't been used
+ * within the timeout window. They are re-spawned automatically on next request.
+ */
+export function startIdleChecker(): void {
+  const idleTimeout = getEnv().IDLE_TIMEOUT;
+  if (!idleTimeout) {
+    logger.debug('IDLE_TIMEOUT not set — containers will run forever');
+    return;
+  }
+  if (idleCheckerRunning) return;
+  idleCheckerRunning = true;
+
+  // Check every 60s or half the timeout, whichever is smaller
+  const checkInterval = Math.min(60_000, Math.floor(idleTimeout / 2));
+
+  logger.info({ idleTimeout, checkInterval }, 'Idle timeout checker started');
+
+  const check = async () => {
+    const now = Date.now();
+    for (const [folder, ts] of lastActivity) {
+      if (now - ts >= idleTimeout && activeContainers.has(folder)) {
+        logger.info(
+          { folder, idleMs: now - ts },
+          'Stopping idle agent container',
+        );
+        await stopGroupContainer(folder);
+        lastActivity.delete(folder);
+      }
+    }
+    setTimeout(check, checkInterval);
+  };
+
+  setTimeout(check, checkInterval);
+}
 
 function containerName(groupFolder: string): string {
   return `yetaclaw-agent-${groupFolder}`;
@@ -294,6 +340,7 @@ async function spawnContainer(
 
   activeContainers.set(groupFolder, name);
   containerModels.set(groupFolder, model);
+  touchContainer(groupFolder);
   logger.info({ groupFolder, name }, 'Agent container started');
   return name;
 }
@@ -303,7 +350,8 @@ async function spawnContainer(
  */
 async function waitForServer(containerName: string): Promise<void> {
   const baseUrl = `http://${containerName}:${OPENCODE_PORT}`;
-  const deadline = Date.now() + SERVER_READY_TIMEOUT;
+  const startupTimeout = getEnv().AGENT_STARTUP_TIMEOUT ?? 30_000;
+  const deadline = Date.now() + startupTimeout;
   let attempts = 0;
   let lastError: string | undefined;
   while (Date.now() < deadline) {
@@ -446,6 +494,7 @@ export async function stopGroupContainer(groupFolder: string): Promise<void> {
   await execFileAsync(DOCKER, ['rm', '-f', name]).catch(() => {});
   activeContainers.delete(groupFolder);
   containerModels.delete(groupFolder);
+  lastActivity.delete(groupFolder);
   logger.info({ groupFolder }, 'Agent container stopped and removed');
 }
 
@@ -458,6 +507,7 @@ export async function stopAllContainers(): Promise<void> {
   await execFileAsync(DOCKER, ['rm', '-f', ...names]).catch(() => {});
   activeContainers.clear();
   containerModels.clear();
+  lastActivity.clear();
   logger.info(
     { count: names.length },
     'All agent containers stopped and removed',
@@ -655,13 +705,12 @@ export async function runAgentSession(
     }
 
     // Poll session status until idle
-    const POLL_TIMEOUT = 180_000; // 3 min
-    const POLL_INTERVAL = 1_000;
-    const deadline = Date.now() + POLL_TIMEOUT;
+    const agentTimeout = getEnv().AGENT_TIMEOUT ?? 480_000; // default 8 min
+    const deadline = Date.now() + agentTimeout;
     let missingFromStatusCount = 0;
     let pollExitReason = 'timeout';
     while (Date.now() < deadline) {
-      await new Promise((r) => setTimeout(r, POLL_INTERVAL));
+      await new Promise((r) => setTimeout(r, RESPONSE_POLL_INTERVAL));
       const statusRes = await client.session.status();
       const sessionStatus = statusRes.data?.[sessionId];
       const statusType = sessionStatus?.type;
@@ -781,9 +830,11 @@ export async function runAgentSession(
       }
     }
 
+    touchContainer(groupFolder);
     return { status: 'success', result: text, newSessionId: sessionId };
   } catch (err) {
     logger.error({ groupFolder, sessionId, err }, 'OpenCode session error');
+    touchContainer(groupFolder);
     return { status: 'error', result: null, error: String(err) };
   }
 }
@@ -852,7 +903,10 @@ export async function cleanupAllAgentContainers(): Promise<void> {
     const ids = stdout.trim().split('\n').filter(Boolean);
     if (ids.length === 0) return;
     await execFileAsync(DOCKER, ['rm', '-f', ...ids]).catch(() => {});
-    logger.info({ count: ids.length }, 'Removed all agent containers before prewarming');
+    logger.info(
+      { count: ids.length },
+      'Removed all agent containers before prewarming',
+    );
   } catch {
     // Docker not available or no containers — ignore
   }

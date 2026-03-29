@@ -13,6 +13,18 @@ const envSchema = z.object({
   // Example: ANTHROPIC_API_KEY,OPENROUTER_API_KEY,AWS_ACCESS_KEY_ID,AWS_SECRET_ACCESS_KEY
   AGENT_FORWARD_ENV: z.string().optional(),
 
+  // Agent response timeout in ms. How long to wait for an agent to finish processing a prompt.
+  // Default: 480000 (8 minutes)
+  AGENT_TIMEOUT: z.coerce.number().positive().optional(),
+
+  // Agent container startup timeout in ms. How long to wait for the OpenCode server health check.
+  // Default: 30000 (30 seconds)
+  AGENT_STARTUP_TIMEOUT: z.coerce.number().positive().optional(),
+
+  // Idle timeout in ms. Containers are stopped after this duration without activity.
+  // Default: undefined (containers run forever)
+  IDLE_TIMEOUT: z.coerce.number().positive().optional(),
+
   // Internal
   OPENVIKING_URL: z.string().url().optional(),
   LOG_LEVEL: z

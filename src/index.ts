@@ -12,6 +12,7 @@ import {
   stopAllContainers,
   runAgentSession,
   warmUpContainers,
+  startIdleChecker,
 } from './container-runner.js';
 import {
   getAllRegisteredGroups,
@@ -411,6 +412,9 @@ async function main(): Promise<void> {
   warmUpContainers(groups).catch((err) =>
     logger.warn({ err }, 'Pre-warm error'),
   );
+
+  // Start idle timeout checker (only active if IDLE_TIMEOUT is set)
+  startIdleChecker();
 
   startMessageLoop().catch((err) => {
     logger.fatal({ err }, 'Message loop crashed');
