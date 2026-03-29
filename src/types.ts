@@ -70,13 +70,13 @@ export interface GroupConfig {
 export interface ScheduledTask {
   id: string;
   jid: string;
-  groupFolder: string;
+  group_folder: string;
   prompt: string;
-  scheduleType: 'cron' | 'interval' | 'once';
-  scheduleValue: string;
-  contextMode: 'group' | 'isolated';
+  schedule_type: 'cron' | 'interval' | 'once';
+  schedule_value: string;
+  context_mode: 'group' | 'isolated';
   status: 'active' | 'paused' | 'completed';
-  nextRun: number;
-  createdAt: number;
-  createdBy: string;
+  next_run: number;
+  created_at: number;
+  created_by: string;
 }

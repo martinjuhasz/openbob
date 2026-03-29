@@ -281,6 +281,12 @@ export function getActiveTasks(): ScheduledTask[] {
     .all() as ScheduledTask[];
 }
 
+export function getTaskById(id: string): ScheduledTask | undefined {
+  return db.prepare(`SELECT * FROM scheduled_tasks WHERE id = ?`).get(id) as
+    | ScheduledTask
+    | undefined;
+}
+
 export function upsertTask(task: ScheduledTask): void {
   db.prepare(
     `
@@ -293,15 +299,15 @@ export function upsertTask(task: ScheduledTask): void {
   ).run(
     task.id,
     task.jid,
-    task.groupFolder,
+    task.group_folder,
     task.prompt,
-    task.scheduleType,
-    task.scheduleValue,
-    task.contextMode,
+    task.schedule_type,
+    task.schedule_value,
+    task.context_mode,
     task.status,
-    task.nextRun,
-    task.createdAt,
-    task.createdBy,
+    task.next_run,
+    task.created_at,
+    task.created_by,
   );
 }
 

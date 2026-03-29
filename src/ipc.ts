@@ -10,6 +10,7 @@ import { DATA_DIR, POLL_INTERVAL } from './config.js';
 import {
   deleteTask,
   getActiveTasks,
+  getTaskById,
   setRegisteredGroup,
   upsertTask,
 } from './db.js';
@@ -272,15 +273,15 @@ export async function processTaskIpc(
       const task: ScheduledTask = {
         id: taskId,
         jid: data.targetJid,
-        groupFolder: targetGroup.folder,
+        group_folder: targetGroup.folder,
         prompt: data.prompt,
-        scheduleType,
-        scheduleValue: data.scheduleValue,
-        contextMode,
+        schedule_type: scheduleType,
+        schedule_value: data.scheduleValue,
+        context_mode: contextMode,
         status: 'active',
-        nextRun,
-        createdAt: Date.now(),
-        createdBy: sourceGroup,
+        next_run: nextRun,
+        created_at: Date.now(),
+        created_by: sourceGroup,
       };
       upsertTask(task);
       logger.info(
@@ -295,7 +296,7 @@ export async function processTaskIpc(
       if (!data.taskId) break;
       const tasks = getActiveTasks();
       const task = tasks.find((t) => t.id === data.taskId);
-      if (task && (isMain || task.groupFolder === sourceGroup)) {
+      if (task && (isMain || task.group_folder === sourceGroup)) {
         deleteTask(data.taskId);
         logger.info(
           { taskId: data.taskId, sourceGroup },
@@ -315,7 +316,7 @@ export async function processTaskIpc(
       if (!data.taskId) break;
       const tasks = getActiveTasks();
       const task = tasks.find((t) => t.id === data.taskId);
-      if (task && (isMain || task.groupFolder === sourceGroup)) {
+      if (task && (isMain || task.group_folder === sourceGroup)) {
         upsertTask({ ...task, status: 'paused' });
         logger.info(
           { taskId: data.taskId, sourceGroup },
@@ -326,6 +327,44 @@ export async function processTaskIpc(
         logger.warn(
           { taskId: data.taskId, sourceGroup },
           'Unauthorized task pause attempt or task not found',
+        );
+      }
+      break;
+    }
+
+    case 'resume_task': {
+      if (!data.taskId) break;
+      const task = getTaskById(data.taskId);
+      if (
+        task &&
+        task.status === 'paused' &&
+        (isMain || task.group_folder === sourceGroup)
+      ) {
+        const now = Date.now();
+        let next_run = task.next_run;
+        // Recalculate next run for recurring tasks since the paused time may have passed
+        if (task.schedule_type === 'cron') {
+          try {
+            const interval = CronExpressionParser.parse(task.schedule_value);
+            next_run = interval.next().getTime();
+          } catch {
+            next_run = now + 60_000;
+          }
+        } else if (task.schedule_type === 'interval') {
+          const ms = parseInt(task.schedule_value, 10);
+          next_run = now + (ms > 0 ? ms : 60_000);
+        }
+        // For 'once' tasks, keep the original next_run
+        upsertTask({ ...task, status: 'active', next_run });
+        logger.info(
+          { taskId: data.taskId, sourceGroup, next_run },
+          'Task resumed via IPC',
+        );
+        deps.onTasksChanged();
+      } else {
+        logger.warn(
+          { taskId: data.taskId, sourceGroup },
+          'Unauthorized task resume attempt or task not found/not paused',
         );
       }
       break;

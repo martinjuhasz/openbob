@@ -23,34 +23,34 @@ export interface SchedulerDeps {
  * Returns null for 'once' tasks (they should be deleted after running).
  */
 export function computeNextRun(task: ScheduledTask): number | null {
-  if (task.scheduleType === 'once') return null;
+  if (task.schedule_type === 'once') return null;
 
   const now = Date.now();
 
-  if (task.scheduleType === 'cron') {
+  if (task.schedule_type === 'cron') {
     try {
-      const interval = CronExpressionParser.parse(task.scheduleValue);
+      const interval = CronExpressionParser.parse(task.schedule_value);
       return interval.next().getTime();
     } catch {
       logger.warn(
-        { taskId: task.id, value: task.scheduleValue },
+        { taskId: task.id, value: task.schedule_value },
         'Invalid cron expression',
       );
       return now + 60_000; // fallback: retry in 1 min
     }
   }
 
-  if (task.scheduleType === 'interval') {
-    const ms = parseInt(task.scheduleValue, 10);
+  if (task.schedule_type === 'interval') {
+    const ms = parseInt(task.schedule_value, 10);
     if (!ms || ms <= 0) {
       logger.warn(
-        { taskId: task.id, value: task.scheduleValue },
+        { taskId: task.id, value: task.schedule_value },
         'Invalid interval value',
       );
       return now + 60_000;
     }
     // Anchor to scheduled time to prevent drift
-    let next = task.nextRun + ms;
+    let next = task.next_run + ms;
     while (next <= now) next += ms;
     return next;
   }
@@ -63,18 +63,18 @@ async function runTask(
   deps: SchedulerDeps,
 ): Promise<void> {
   logger.info(
-    { taskId: task.id, groupFolder: task.groupFolder },
+    { taskId: task.id, group_folder: task.group_folder },
     'Running scheduled task',
   );
 
   const groups = deps.registeredGroups();
   const group = Object.values(groups).find(
-    (g) => g.folder === task.groupFolder,
+    (g) => g.folder === task.group_folder,
   );
 
   if (!group) {
     logger.error(
-      { taskId: task.id, groupFolder: task.groupFolder },
+      { taskId: task.id, group_folder: task.group_folder },
       'Group not found for task',
     );
     deleteTask(task.id);
@@ -82,8 +82,8 @@ async function runTask(
   }
 
   const sessionId =
-    task.contextMode === 'group'
-      ? (deps.getSession(task.groupFolder) ?? undefined)
+    task.context_mode === 'group'
+      ? (deps.getSession(task.group_folder) ?? undefined)
       : undefined;
 
   try {
@@ -92,15 +92,15 @@ async function runTask(
     const output = await runAgentSession({
       prompt: task.prompt,
       sessionId,
-      groupFolder: task.groupFolder,
+      groupFolder: task.group_folder,
       chatJid: task.jid,
       isMain: group.isMain,
       isScheduledTask: true,
       model,
     });
 
-    if (output.newSessionId && task.contextMode === 'group') {
-      deps.setSession(task.groupFolder, output.newSessionId);
+    if (output.newSessionId && task.context_mode === 'group') {
+      deps.setSession(task.group_folder, output.newSessionId);
     }
 
     if (output.status === 'success' && output.result) {
@@ -122,7 +122,7 @@ async function runTask(
     deleteTask(task.id);
     logger.info({ taskId: task.id }, 'One-time task completed and removed');
   } else {
-    upsertTask({ ...task, nextRun });
+    upsertTask({ ...task, next_run: nextRun });
     logger.info({ taskId: task.id, nextRun }, 'Task rescheduled');
   }
 }
@@ -140,7 +140,7 @@ export function startSchedulerLoop(deps: SchedulerDeps): void {
   const loop = async () => {
     try {
       const now = Date.now();
-      const dueTasks = getActiveTasks().filter((t) => t.nextRun <= now);
+      const dueTasks = getActiveTasks().filter((t) => t.next_run <= now);
 
       for (const task of dueTasks) {
         deps.queue.enqueueTask(task.jid, task.id, () => runTask(task, deps));
