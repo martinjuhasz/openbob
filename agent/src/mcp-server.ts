@@ -58,7 +58,7 @@ server.tool(
       .optional()
       .describe('Your role/identity name shown above the message.'),
   },
-  async (args) => {
+  async (args: { text: string; sender?: string }) => {
     const ctx = readContext();
     writeIpcFile(MESSAGES_DIR, {
       type: 'message',
@@ -100,7 +100,13 @@ SCHEDULE VALUE FORMAT (local timezone):
         '(Main group only) Target group JID. Defaults to current group.',
       ),
   },
-  async (args) => {
+  async (args: {
+    prompt: string;
+    schedule_type: 'cron' | 'interval' | 'once';
+    schedule_value: string;
+    context_mode?: 'group' | 'isolated';
+    target_group_jid?: string;
+  }) => {
     if (args.schedule_type === 'cron') {
       try {
         CronExpressionParser.parse(args.schedule_value);
@@ -182,7 +188,7 @@ server.tool(
   'cancel_task',
   'Cancel and delete a scheduled task.',
   { task_id: z.string() },
-  async (args) => {
+  async (args: { task_id: string }) => {
     const ctx = readContext();
     writeIpcFile(TASKS_DIR, {
       type: 'cancel_task',
@@ -205,7 +211,7 @@ server.tool(
   'pause_task',
   'Pause a scheduled task.',
   { task_id: z.string() },
-  async (args) => {
+  async (args: { task_id: string }) => {
     const ctx = readContext();
     writeIpcFile(TASKS_DIR, {
       type: 'pause_task',
@@ -225,7 +231,7 @@ server.tool(
   'resume_task',
   'Resume a paused task.',
   { task_id: z.string() },
-  async (args) => {
+  async (args: { task_id: string }) => {
     const ctx = readContext();
     writeIpcFile(TASKS_DIR, {
       type: 'resume_task',
@@ -271,7 +277,14 @@ Get the channel JID from the user — format: "mm:<channel-id>"`,
         'Per-group model override, e.g. "anthropic/claude-sonnet-4-6". Omit to use the global default.',
       ),
   },
-  async (args) => {
+  async (args: {
+    jid: string;
+    name: string;
+    folder: string;
+    trigger: string;
+    always_respond?: boolean;
+    model?: string;
+  }) => {
     const ctx = readContext();
     if (!ctx.isMain) {
       return {
@@ -320,7 +333,13 @@ server.tool(
         'Per-group model override. Set to empty string to clear and use global default.',
       ),
   },
-  async (args) => {
+  async (args: {
+    jid: string;
+    name?: string;
+    trigger?: string;
+    always_respond?: boolean;
+    model?: string;
+  }) => {
     const ctx = readContext();
     if (!ctx.isMain) {
       return {
