@@ -6,15 +6,38 @@ import { GroupConfig } from './types.js';
 vi.mock('./db.js', () => ({
   getActiveTasks: vi.fn(() => []),
   getTaskById: vi.fn(() => undefined),
+  getTasksForGroup: vi.fn(() => []),
+  getAllTasks: vi.fn(() => []),
+  updateTask: vi.fn(),
   upsertTask: vi.fn(),
   deleteTask: vi.fn(),
   setRegisteredGroup: vi.fn(),
 }));
 
+// Mock fs for list_tasks response file writing
+vi.mock('fs', async () => {
+  const actual = await vi.importActual<typeof import('fs')>('fs');
+  return {
+    ...actual,
+    default: {
+      ...actual,
+      mkdirSync: vi.fn(),
+      writeFileSync: vi.fn(),
+      renameSync: vi.fn(),
+    },
+  };
+});
+
+import fs from 'fs';
+
 import {
   upsertTask,
   deleteTask,
   getActiveTasks,
+  getTaskById,
+  getTasksForGroup,
+  getAllTasks,
+  updateTask,
   setRegisteredGroup,
 } from './db.js';
 
@@ -312,6 +335,362 @@ describe('processTaskIpc', () => {
         deps,
       );
       expect(deps.registered[0]?.alwaysRespond).toBe(true);
+    });
+  });
+
+  describe('list_tasks', () => {
+    const task1 = {
+      id: 'task-1',
+      jid: 'mm:abc',
+      group_folder: 'group-a',
+      prompt: 'check health',
+      schedule_type: 'cron' as const,
+      schedule_value: '0 9 * * *',
+      context_mode: 'isolated' as const,
+      status: 'active' as const,
+      next_run: Date.now() + 60000,
+      created_at: Date.now(),
+      created_by: 'group-a',
+    };
+    const task2 = {
+      id: 'task-2',
+      jid: 'mm:xyz',
+      group_folder: 'group-b',
+      prompt: 'daily report',
+      schedule_type: 'interval' as const,
+      schedule_value: '3600000',
+      context_mode: 'group' as const,
+      status: 'active' as const,
+      next_run: Date.now() + 120000,
+      created_at: Date.now(),
+      created_by: 'group-b',
+    };
+
+    it('main group sees all tasks', async () => {
+      vi.mocked(getAllTasks).mockReturnValue([task1, task2]);
+      const deps = makeDeps({});
+      await processTaskIpc(
+        { type: 'list_tasks', requestId: 'req-123' },
+        'main-group',
+        true,
+        new Map(),
+        deps,
+      );
+
+      expect(getAllTasks).toHaveBeenCalledOnce();
+      expect(getTasksForGroup).not.toHaveBeenCalled();
+      expect(fs.mkdirSync).toHaveBeenCalled();
+      // Verify atomic write: writeFileSync to .tmp then renameSync
+      expect(fs.writeFileSync).toHaveBeenCalledOnce();
+      const writtenPath = vi.mocked(fs.writeFileSync).mock
+        .calls[0]?.[0] as string;
+      expect(writtenPath).toContain('req-123.json.tmp');
+      const writtenData = JSON.parse(
+        vi.mocked(fs.writeFileSync).mock.calls[0]?.[1] as string,
+      );
+      expect(writtenData.tasks).toHaveLength(2);
+      expect(fs.renameSync).toHaveBeenCalledOnce();
+    });
+
+    it('non-main group sees only own tasks', async () => {
+      vi.mocked(getTasksForGroup).mockReturnValue([task1]);
+      const deps = makeDeps({});
+      await processTaskIpc(
+        { type: 'list_tasks', requestId: 'req-456' },
+        'group-a',
+        false,
+        new Map(),
+        deps,
+      );
+
+      expect(getTasksForGroup).toHaveBeenCalledWith('group-a');
+      expect(getAllTasks).not.toHaveBeenCalled();
+      const writtenData = JSON.parse(
+        vi.mocked(fs.writeFileSync).mock.calls[0]?.[1] as string,
+      );
+      expect(writtenData.tasks).toHaveLength(1);
+      expect(writtenData.tasks[0].id).toBe('task-1');
+    });
+
+    it('does nothing without requestId', async () => {
+      const deps = makeDeps({});
+      await processTaskIpc(
+        { type: 'list_tasks' },
+        'main-group',
+        true,
+        new Map(),
+        deps,
+      );
+
+      expect(getAllTasks).not.toHaveBeenCalled();
+      expect(getTasksForGroup).not.toHaveBeenCalled();
+      expect(fs.writeFileSync).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('update_task', () => {
+    const existingTask = {
+      id: 'task-1',
+      jid: 'mm:abc',
+      group_folder: 'group-a',
+      prompt: 'original prompt',
+      schedule_type: 'cron' as const,
+      schedule_value: '0 9 * * *',
+      context_mode: 'isolated' as const,
+      status: 'active' as const,
+      next_run: Date.now() + 60000,
+      created_at: Date.now(),
+      created_by: 'group-a',
+    };
+
+    it('updates prompt only', async () => {
+      vi.mocked(getTaskById).mockReturnValue(existingTask);
+      const deps = makeDeps({});
+      await processTaskIpc(
+        { type: 'update_task', taskId: 'task-1', prompt: 'new prompt' },
+        'group-a',
+        false,
+        new Map(),
+        deps,
+      );
+
+      expect(updateTask).toHaveBeenCalledWith('task-1', {
+        prompt: 'new prompt',
+      });
+      expect(deps.tasksChanged).toHaveLength(1);
+    });
+
+    it('updates context_mode', async () => {
+      vi.mocked(getTaskById).mockReturnValue(existingTask);
+      const deps = makeDeps({});
+      await processTaskIpc(
+        { type: 'update_task', taskId: 'task-1', contextMode: 'group' },
+        'group-a',
+        false,
+        new Map(),
+        deps,
+      );
+
+      expect(updateTask).toHaveBeenCalledWith('task-1', {
+        context_mode: 'group',
+      });
+      expect(deps.tasksChanged).toHaveLength(1);
+    });
+
+    it('recalculates next_run when schedule changes to interval', async () => {
+      vi.mocked(getTaskById).mockReturnValue(existingTask);
+      const deps = makeDeps({});
+      const before = Date.now();
+      await processTaskIpc(
+        {
+          type: 'update_task',
+          taskId: 'task-1',
+          scheduleType: 'interval',
+          scheduleValue: '60000',
+        },
+        'group-a',
+        false,
+        new Map(),
+        deps,
+      );
+
+      expect(updateTask).toHaveBeenCalledOnce();
+      const fields = vi.mocked(updateTask).mock.calls[0]?.[1];
+      expect(fields?.schedule_type).toBe('interval');
+      expect(fields?.schedule_value).toBe('60000');
+      expect(fields?.next_run).toBeGreaterThanOrEqual(before + 60000);
+      expect(deps.tasksChanged).toHaveLength(1);
+    });
+
+    it('recalculates next_run when schedule changes to cron', async () => {
+      vi.mocked(getTaskById).mockReturnValue({
+        ...existingTask,
+        schedule_type: 'interval',
+        schedule_value: '60000',
+      });
+      const deps = makeDeps({});
+      await processTaskIpc(
+        {
+          type: 'update_task',
+          taskId: 'task-1',
+          scheduleType: 'cron',
+          scheduleValue: '*/5 * * * *',
+        },
+        'group-a',
+        false,
+        new Map(),
+        deps,
+      );
+
+      expect(updateTask).toHaveBeenCalledOnce();
+      const fields = vi.mocked(updateTask).mock.calls[0]?.[1];
+      expect(fields?.schedule_type).toBe('cron');
+      expect(fields?.schedule_value).toBe('*/5 * * * *');
+      expect(fields?.next_run).toBeGreaterThan(Date.now() - 1000);
+    });
+
+    it('recalculates next_run when schedule changes to once', async () => {
+      const futureDate = '2099-12-31T23:59:59.000Z';
+      vi.mocked(getTaskById).mockReturnValue(existingTask);
+      const deps = makeDeps({});
+      await processTaskIpc(
+        {
+          type: 'update_task',
+          taskId: 'task-1',
+          scheduleType: 'once',
+          scheduleValue: futureDate,
+        },
+        'group-a',
+        false,
+        new Map(),
+        deps,
+      );
+
+      expect(updateTask).toHaveBeenCalledOnce();
+      const fields = vi.mocked(updateTask).mock.calls[0]?.[1];
+      expect(fields?.next_run).toBe(new Date(futureDate).getTime());
+    });
+
+    it('rejects update from unauthorized group', async () => {
+      vi.mocked(getTaskById).mockReturnValue(existingTask);
+      const deps = makeDeps({});
+      await processTaskIpc(
+        { type: 'update_task', taskId: 'task-1', prompt: 'hacked' },
+        'group-b', // different group
+        false,
+        new Map(),
+        deps,
+      );
+
+      expect(updateTask).not.toHaveBeenCalled();
+      expect(deps.tasksChanged).toHaveLength(0);
+    });
+
+    it('main group can update any task', async () => {
+      vi.mocked(getTaskById).mockReturnValue(existingTask);
+      const deps = makeDeps({});
+      await processTaskIpc(
+        { type: 'update_task', taskId: 'task-1', prompt: 'admin override' },
+        'main-group',
+        true,
+        new Map(),
+        deps,
+      );
+
+      expect(updateTask).toHaveBeenCalledWith('task-1', {
+        prompt: 'admin override',
+      });
+      expect(deps.tasksChanged).toHaveLength(1);
+    });
+
+    it('does nothing when task not found', async () => {
+      vi.mocked(getTaskById).mockReturnValue(undefined);
+      const deps = makeDeps({});
+      await processTaskIpc(
+        { type: 'update_task', taskId: 'nonexistent', prompt: 'nope' },
+        'group-a',
+        false,
+        new Map(),
+        deps,
+      );
+
+      expect(updateTask).not.toHaveBeenCalled();
+      expect(deps.tasksChanged).toHaveLength(0);
+    });
+
+    it('does nothing without taskId', async () => {
+      const deps = makeDeps({});
+      await processTaskIpc(
+        { type: 'update_task', prompt: 'no id' },
+        'group-a',
+        false,
+        new Map(),
+        deps,
+      );
+
+      expect(getTaskById).not.toHaveBeenCalled();
+      expect(updateTask).not.toHaveBeenCalled();
+    });
+
+    it('rejects invalid cron expression', async () => {
+      vi.mocked(getTaskById).mockReturnValue(existingTask);
+      const deps = makeDeps({});
+      await processTaskIpc(
+        {
+          type: 'update_task',
+          taskId: 'task-1',
+          scheduleType: 'cron',
+          scheduleValue: 'not-a-cron',
+        },
+        'group-a',
+        false,
+        new Map(),
+        deps,
+      );
+
+      expect(updateTask).not.toHaveBeenCalled();
+    });
+
+    it('rejects invalid interval value', async () => {
+      vi.mocked(getTaskById).mockReturnValue(existingTask);
+      const deps = makeDeps({});
+      await processTaskIpc(
+        {
+          type: 'update_task',
+          taskId: 'task-1',
+          scheduleType: 'interval',
+          scheduleValue: 'abc',
+        },
+        'group-a',
+        false,
+        new Map(),
+        deps,
+      );
+
+      expect(updateTask).not.toHaveBeenCalled();
+    });
+
+    it('rejects invalid once timestamp', async () => {
+      vi.mocked(getTaskById).mockReturnValue(existingTask);
+      const deps = makeDeps({});
+      await processTaskIpc(
+        {
+          type: 'update_task',
+          taskId: 'task-1',
+          scheduleType: 'once',
+          scheduleValue: 'not-a-date',
+        },
+        'group-a',
+        false,
+        new Map(),
+        deps,
+      );
+
+      expect(updateTask).not.toHaveBeenCalled();
+    });
+
+    it('updates only scheduleValue, inheriting existing scheduleType', async () => {
+      vi.mocked(getTaskById).mockReturnValue(existingTask); // cron type
+      const deps = makeDeps({});
+      await processTaskIpc(
+        {
+          type: 'update_task',
+          taskId: 'task-1',
+          scheduleValue: '30 8 * * *',
+        },
+        'group-a',
+        false,
+        new Map(),
+        deps,
+      );
+
+      expect(updateTask).toHaveBeenCalledOnce();
+      const fields = vi.mocked(updateTask).mock.calls[0]?.[1];
+      expect(fields?.schedule_value).toBe('30 8 * * *');
+      // schedule_type should NOT be in fields since it wasn't changed
+      expect(fields?.schedule_type).toBeUndefined();
+      // next_run should be recalculated (scheduleValue changed)
+      expect(fields?.next_run).toBeDefined();
     });
   });
 

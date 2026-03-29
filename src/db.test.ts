@@ -295,10 +295,40 @@ describe('router_state', () => {
 });
 
 describe('scheduled_tasks', () => {
-  it('stores and retrieves active tasks', () => {
+  function insertTask(overrides: Record<string, unknown> = {}) {
+    const defaults = {
+      id: 't1',
+      jid: 'mm:ch1',
+      group_folder: 'dev',
+      prompt: 'do stuff',
+      schedule_type: 'cron',
+      schedule_value: '0 9 * * *',
+      context_mode: 'isolated',
+      status: 'active',
+      next_run: 9999999999,
+      created_at: 1700000000000,
+      created_by: 'bot',
+    };
+    const t = { ...defaults, ...overrides };
     db.prepare(
-      `INSERT INTO scheduled_tasks (id,jid,group_folder,prompt,schedule_type,schedule_value,context_mode,status,next_run,created_at,created_by) VALUES ('t1','mm:ch1','dev','do stuff','cron','0 9 * * *','isolated','active',9999999999,1700000000000,'bot')`,
-    ).run();
+      `INSERT INTO scheduled_tasks (id,jid,group_folder,prompt,schedule_type,schedule_value,context_mode,status,next_run,created_at,created_by) VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+    ).run(
+      t.id,
+      t.jid,
+      t.group_folder,
+      t.prompt,
+      t.schedule_type,
+      t.schedule_value,
+      t.context_mode,
+      t.status,
+      t.next_run,
+      t.created_at,
+      t.created_by,
+    );
+  }
+
+  it('stores and retrieves active tasks', () => {
+    insertTask();
     const tasks = db
       .prepare(
         `SELECT * FROM scheduled_tasks WHERE status='active' ORDER BY next_run ASC`,
@@ -307,5 +337,200 @@ describe('scheduled_tasks', () => {
     expect(tasks).toHaveLength(1);
     expect(tasks[0]?.id).toBe('t1');
     expect(tasks[0]?.prompt).toBe('do stuff');
+  });
+
+  describe('getTaskById', () => {
+    it('returns the task when it exists', () => {
+      insertTask({ id: 'find-me' });
+      const row = db
+        .prepare(`SELECT * FROM scheduled_tasks WHERE id = ?`)
+        .get('find-me') as { id: string; prompt: string } | undefined;
+      expect(row).toBeDefined();
+      expect(row?.id).toBe('find-me');
+      expect(row?.prompt).toBe('do stuff');
+    });
+
+    it('returns undefined when task does not exist', () => {
+      const row = db
+        .prepare(`SELECT * FROM scheduled_tasks WHERE id = ?`)
+        .get('nonexistent') as { id: string } | undefined;
+      expect(row).toBeUndefined();
+    });
+  });
+
+  describe('getTasksForGroup', () => {
+    it('returns only tasks for the given group_folder', () => {
+      insertTask({ id: 't1', group_folder: 'group-a' });
+      insertTask({ id: 't2', group_folder: 'group-a' });
+      insertTask({ id: 't3', group_folder: 'group-b' });
+
+      const rows = db
+        .prepare(
+          `SELECT * FROM scheduled_tasks WHERE group_folder = ? ORDER BY created_at DESC`,
+        )
+        .all('group-a') as Array<{ id: string }>;
+      expect(rows).toHaveLength(2);
+      expect(rows.map((r) => r.id).sort()).toEqual(['t1', 't2']);
+    });
+
+    it('returns empty array when no tasks exist for group', () => {
+      insertTask({ id: 't1', group_folder: 'group-a' });
+      const rows = db
+        .prepare(
+          `SELECT * FROM scheduled_tasks WHERE group_folder = ? ORDER BY created_at DESC`,
+        )
+        .all('group-z') as Array<{ id: string }>;
+      expect(rows).toHaveLength(0);
+    });
+
+    it('includes all statuses (active, paused, completed)', () => {
+      insertTask({ id: 't1', group_folder: 'grp', status: 'active' });
+      insertTask({ id: 't2', group_folder: 'grp', status: 'paused' });
+      insertTask({ id: 't3', group_folder: 'grp', status: 'completed' });
+
+      const rows = db
+        .prepare(
+          `SELECT * FROM scheduled_tasks WHERE group_folder = ? ORDER BY created_at DESC`,
+        )
+        .all('grp') as Array<{ id: string; status: string }>;
+      expect(rows).toHaveLength(3);
+      expect(rows.map((r) => r.status).sort()).toEqual([
+        'active',
+        'completed',
+        'paused',
+      ]);
+    });
+  });
+
+  describe('getAllTasks', () => {
+    it('returns all tasks across all groups', () => {
+      insertTask({ id: 't1', group_folder: 'group-a' });
+      insertTask({ id: 't2', group_folder: 'group-b' });
+      insertTask({ id: 't3', group_folder: 'group-c' });
+
+      const rows = db
+        .prepare(`SELECT * FROM scheduled_tasks ORDER BY created_at DESC`)
+        .all() as Array<{ id: string }>;
+      expect(rows).toHaveLength(3);
+    });
+
+    it('returns empty array when no tasks exist', () => {
+      const rows = db
+        .prepare(`SELECT * FROM scheduled_tasks ORDER BY created_at DESC`)
+        .all() as Array<{ id: string }>;
+      expect(rows).toHaveLength(0);
+    });
+  });
+
+  describe('updateTask', () => {
+    it('updates prompt only', () => {
+      insertTask({ id: 'u1', prompt: 'original' });
+      db.prepare(`UPDATE scheduled_tasks SET prompt = ? WHERE id = ?`).run(
+        'updated prompt',
+        'u1',
+      );
+
+      const row = db
+        .prepare(`SELECT * FROM scheduled_tasks WHERE id = ?`)
+        .get('u1') as { prompt: string; schedule_type: string };
+      expect(row.prompt).toBe('updated prompt');
+      expect(row.schedule_type).toBe('cron'); // unchanged
+    });
+
+    it('updates schedule_type and schedule_value together', () => {
+      insertTask({
+        id: 'u2',
+        schedule_type: 'cron',
+        schedule_value: '0 9 * * *',
+      });
+      db.prepare(
+        `UPDATE scheduled_tasks SET schedule_type = ?, schedule_value = ? WHERE id = ?`,
+      ).run('interval', '60000', 'u2');
+
+      const row = db
+        .prepare(`SELECT * FROM scheduled_tasks WHERE id = ?`)
+        .get('u2') as { schedule_type: string; schedule_value: string };
+      expect(row.schedule_type).toBe('interval');
+      expect(row.schedule_value).toBe('60000');
+    });
+
+    it('updates context_mode', () => {
+      insertTask({ id: 'u3', context_mode: 'isolated' });
+      db.prepare(
+        `UPDATE scheduled_tasks SET context_mode = ? WHERE id = ?`,
+      ).run('group', 'u3');
+
+      const row = db
+        .prepare(`SELECT * FROM scheduled_tasks WHERE id = ?`)
+        .get('u3') as { context_mode: string };
+      expect(row.context_mode).toBe('group');
+    });
+
+    it('updates next_run', () => {
+      insertTask({ id: 'u4', next_run: 1000 });
+      db.prepare(`UPDATE scheduled_tasks SET next_run = ? WHERE id = ?`).run(
+        9999,
+        'u4',
+      );
+
+      const row = db
+        .prepare(`SELECT * FROM scheduled_tasks WHERE id = ?`)
+        .get('u4') as { next_run: number };
+      expect(row.next_run).toBe(9999);
+    });
+
+    it('updates status', () => {
+      insertTask({ id: 'u5', status: 'active' });
+      db.prepare(`UPDATE scheduled_tasks SET status = ? WHERE id = ?`).run(
+        'paused',
+        'u5',
+      );
+
+      const row = db
+        .prepare(`SELECT * FROM scheduled_tasks WHERE id = ?`)
+        .get('u5') as { status: string };
+      expect(row.status).toBe('paused');
+    });
+
+    it('updates multiple fields at once', () => {
+      insertTask({
+        id: 'u6',
+        prompt: 'old',
+        context_mode: 'isolated',
+        next_run: 1000,
+      });
+      db.prepare(
+        `UPDATE scheduled_tasks SET prompt = ?, context_mode = ?, next_run = ? WHERE id = ?`,
+      ).run('new prompt', 'group', 5000, 'u6');
+
+      const row = db
+        .prepare(`SELECT * FROM scheduled_tasks WHERE id = ?`)
+        .get('u6') as {
+        prompt: string;
+        context_mode: string;
+        next_run: number;
+      };
+      expect(row.prompt).toBe('new prompt');
+      expect(row.context_mode).toBe('group');
+      expect(row.next_run).toBe(5000);
+    });
+
+    it('does not affect other tasks', () => {
+      insertTask({ id: 'u7', prompt: 'keep me' });
+      insertTask({ id: 'u8', prompt: 'change me' });
+      db.prepare(`UPDATE scheduled_tasks SET prompt = ? WHERE id = ?`).run(
+        'changed',
+        'u8',
+      );
+
+      const kept = db
+        .prepare(`SELECT prompt FROM scheduled_tasks WHERE id = ?`)
+        .get('u7') as { prompt: string };
+      const changed = db
+        .prepare(`SELECT prompt FROM scheduled_tasks WHERE id = ?`)
+        .get('u8') as { prompt: string };
+      expect(kept.prompt).toBe('keep me');
+      expect(changed.prompt).toBe('changed');
+    });
   });
 });
