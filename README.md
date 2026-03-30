@@ -7,7 +7,7 @@
 yetaclaw connects to your messaging platform, watches for a trigger word, and routes messages to an AI agent running in its own isolated Docker container. Each group/channel gets a dedicated agent with its own workspace, session history, and filesystem — fully sandboxed from the host and other groups.
 
 ```
-Mattermost (or other channel)
+Telegram / Mattermost (or other channel)
         |
 Host (Node.js) — polls messages, routes to groups
         |
@@ -22,7 +22,7 @@ Response back via IPC -> Host -> Channel
 
 ## Features
 
-- **Multi-channel messaging** — Currently supports Mattermost. Architecture is extensible via channel registry.
+- **Multi-channel messaging** — Supports Telegram and Mattermost. Architecture is extensible via channel registry.
 - **Isolated group context** — Each group gets its own Docker container, workspace, `opencode.json` config, and session history.
 - **Main channel** — A privileged admin channel that can register new groups and manage the system.
 - **Scheduled tasks** — Cron, interval, or one-shot tasks that spin up the agent and can message results back.
@@ -37,7 +37,7 @@ Response back via IPC -> Host -> Channel
 ### Prerequisites
 
 - Docker + Docker Compose
-- A Mattermost instance with a bot account (token)
+- A messaging platform: **Telegram bot** (token from [@BotFather](https://t.me/BotFather)) or **Mattermost** instance with a bot account
 - An API key for your LLM provider (e.g., Anthropic, OpenRouter)
 
 ### Setup
@@ -54,17 +54,55 @@ Edit `.env` with your configuration:
 # Absolute path on the host machine for persistent data
 DATA_PATH=/opt/yetaclaw/data
 
-# Mattermost connection
-MATTERMOST_URL=https://your-mattermost.com
-MATTERMOST_TOKEN=your-bot-token
-
 # LLM model — format: providerID/modelID
 MODEL=anthropic/claude-sonnet-4-6
 
-# Initial channel to monitor
-INITIAL_GROUP_JID=mm:your-channel-id
-INITIAL_GROUP_TRIGGER=yetaclaw
+# --- Channel: pick Telegram OR Mattermost (or both) ---
+
+# Telegram
+TELEGRAM_BOT_TOKEN=your-bot-token
+
+# Mattermost
+MATTERMOST_URL=https://your-mattermost.com
+MATTERMOST_TOKEN=your-bot-token
 ```
+
+### Initial Channel Setup
+
+On first run, yetaclaw needs at least one registered group to monitor. Set the `INITIAL_GROUP_*` env vars to bootstrap it — the channel type is detected automatically from the JID prefix (`tg:` → Telegram, `mm:` → Mattermost).
+
+**Step 1: Get your Chat ID**
+
+Start yetaclaw with the channel credentials set (e.g. `TELEGRAM_BOT_TOKEN`). Then:
+
+- **Telegram**: Send `/chatid` to your bot in the target chat. It replies with the JID, e.g. `tg:-1001234567890`.
+- **Mattermost**: The channel ID is visible in the channel URL or via the Mattermost API. Prefix it: `mm:your-channel-id`.
+
+**Step 2: Configure the initial group**
+
+Add to your `.env`:
+
+```bash
+# Telegram example
+INITIAL_GROUP_JID=tg:-1001234567890
+INITIAL_GROUP_TRIGGER=yetaclaw
+
+# Mattermost example
+# INITIAL_GROUP_JID=mm:your-channel-id
+# INITIAL_GROUP_TRIGGER=yetaclaw
+```
+
+Optional overrides (sensible defaults are applied):
+
+```bash
+INITIAL_GROUP_NAME=Main            # display name (default: "Main")
+INITIAL_GROUP_FOLDER=main          # workspace folder (default: "main")
+INITIAL_GROUP_IS_MAIN=true         # admin privileges (default: true)
+```
+
+**Step 3: Restart** — the group is persisted to the database. After the first run, these env vars are ignored for that JID (it won't overwrite existing entries).
+
+> Additional groups can be registered at runtime via the `register_group` MCP tool from the main channel's agent.
 
 Copy your OpenCode auth credentials:
 
@@ -88,7 +126,7 @@ docker compose --profile memory up -d
 
 ### First Message
 
-In your configured Mattermost channel, type:
+In your configured channel, mention the trigger word:
 
 ```
 @yetaclaw hello, what can you do?
@@ -107,6 +145,7 @@ Single Node.js process that orchestrates everything:
 | `index.ts`               | Main loop — startup, polling, message dispatch        |
 | `container-runner.ts`    | Spawns/manages Docker containers, OpenCode SDK client |
 | `channels/mattermost.ts` | Mattermost channel adapter                            |
+| `channels/telegram.ts`   | Telegram channel adapter                              |
 | `channels/registry.ts`   | Channel self-registration                             |
 | `router.ts`              | Message formatting, trigger detection, routing        |
 | `group-queue.ts`         | Per-group message queue with concurrency control      |
@@ -160,14 +199,15 @@ All containers share the `yetaclaw` Docker network. The host reaches agent conta
 | Variable                | Required  | Description                                                     |
 | ----------------------- | --------- | --------------------------------------------------------------- |
 | `DATA_PATH`             | Yes       | Absolute host path for persistent data                          |
-| `MATTERMOST_URL`        | Yes       | Mattermost server URL                                           |
-| `MATTERMOST_TOKEN`      | Yes       | Bot account token                                               |
 | `MODEL`                 | Yes       | Default model, e.g. `anthropic/claude-sonnet-4-6`               |
-| `INITIAL_GROUP_JID`     | First run | Channel ID, format: `mm:<channel-id>`                           |
-| `INITIAL_GROUP_NAME`    | First run | Display name for the group                                      |
-| `INITIAL_GROUP_FOLDER`  | First run | Workspace folder name                                           |
-| `INITIAL_GROUP_TRIGGER` | First run | Trigger word (e.g. `yetaclaw`)                                  |
-| `INITIAL_GROUP_IS_MAIN` | First run | `true` for admin channel                                        |
+| `TELEGRAM_BOT_TOKEN`    | Channel   | Telegram bot token (from @BotFather)                            |
+| `MATTERMOST_URL`        | Channel   | Mattermost server URL                                           |
+| `MATTERMOST_TOKEN`      | Channel   | Mattermost bot account token                                    |
+| `INITIAL_GROUP_JID`     | First run | Channel JID — prefix determines channel (`tg:` / `mm:`)         |
+| `INITIAL_GROUP_NAME`    | No        | Display name (default: `Main`)                                  |
+| `INITIAL_GROUP_FOLDER`  | No        | Workspace folder name (default: `main`)                         |
+| `INITIAL_GROUP_TRIGGER` | No        | Trigger word (default: assistant name)                          |
+| `INITIAL_GROUP_IS_MAIN` | No        | `true` for admin channel (default: `true`)                      |
 | `LOG_LEVEL`             | No        | `trace` / `debug` / `info` / `warn` / `error` (default: `info`) |
 | `AGENT_FORWARD_ENV`     | No        | Comma-separated env vars to forward to agent containers         |
 | `OPENVIKING_URL`        | No        | OpenViking API URL (default: `http://openviking:1933`)          |
@@ -247,7 +287,7 @@ docker compose build
 ```
 yetaclaw/
 ├── src/                    # Host application
-│   ├── channels/           # Channel adapters (Mattermost, ...)
+│   ├── channels/           # Channel adapters (Telegram, Mattermost, ...)
 │   ├── index.ts            # Orchestrator main loop
 │   ├── container-runner.ts # Docker container management
 │   ├── db.ts               # SQLite database

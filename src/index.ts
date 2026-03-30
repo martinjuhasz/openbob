@@ -274,6 +274,17 @@ function recoverPendingMessages(): void {
   }
 }
 
+function channelFromJid(jid: string): string {
+  const colonIndex = jid.indexOf(':');
+  if (colonIndex === -1) return 'unknown';
+  const prefix = jid.slice(0, colonIndex);
+  const prefixToChannel: Record<string, string> = {
+    tg: 'telegram',
+    mm: 'mattermost',
+  };
+  return prefixToChannel[prefix] ?? 'unknown';
+}
+
 function registerInitialGroupFromEnv(): void {
   const jid = process.env['INITIAL_GROUP_JID'];
   if (!jid) return;
@@ -289,7 +300,7 @@ function registerInitialGroupFromEnv(): void {
     name: process.env['INITIAL_GROUP_NAME'] ?? 'Main',
     folder: process.env['INITIAL_GROUP_FOLDER'] ?? 'main',
     trigger: process.env['INITIAL_GROUP_TRIGGER'] ?? ASSISTANT_NAME,
-    channel: 'mattermost',
+    channel: channelFromJid(jid),
     isMain,
     alwaysRespond:
       process.env['INITIAL_GROUP_ALWAYS_RESPOND'] === 'true' || isMain,
