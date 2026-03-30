@@ -6,7 +6,7 @@ import path from 'path';
 
 import { CronExpressionParser } from 'cron-parser';
 
-import { DATA_DIR, POLL_INTERVAL } from './config.js';
+import { channelFromJid, DATA_DIR, POLL_INTERVAL } from './config.js';
 import {
   deleteTask,
   getActiveTasks,
@@ -569,7 +569,7 @@ export async function processTaskIpc(
         name: data.name,
         folder: data.folder,
         trigger: data.trigger,
-        channel: data.jid.split(':')[0] ?? 'mattermost',
+        channel: channelFromJid(data.jid),
         isMain: data.isMain === true,
         alwaysRespond: data.alwaysRespond === true || data.isMain === true,
         createdAt: Date.now(),

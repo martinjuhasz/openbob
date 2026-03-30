@@ -420,12 +420,14 @@ server.tool(
   'register_group',
   `Register a new chat/group so the bot can respond to messages there. Main group only.
 
-The bot user must already be a member of the target Mattermost channel.
-Get the channel JID from the user — format: "mm:<channel-id>"`,
+The bot user must already be a member of the target channel/group.
+Get the channel JID from the user — format: "tg:<chat-id>" for Telegram or "mm:<channel-id>" for Mattermost.`,
   {
     jid: z
       .string()
-      .describe('Channel JID, e.g. "mm:bsn8i7mwgbgej8cq3ppda7r98w"'),
+      .describe(
+        'Channel JID, e.g. "tg:-1001234567890" or "mm:bsn8i7mwgbgej8cq3ppda7r98w"',
+      ),
     name: z.string().describe('Display name for the group'),
     folder: z
       .string()

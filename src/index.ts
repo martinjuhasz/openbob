@@ -1,7 +1,7 @@
 // yetaclaw Host — Entry Point
 // Startup sequence: DB → CredentialProxy → IpcWatcher → TaskScheduler → Channels → Router
 
-import { ASSISTANT_NAME, POLL_INTERVAL } from './config.js';
+import { ASSISTANT_NAME, POLL_INTERVAL, channelFromJid } from './config.js';
 import './channels/index.js';
 import { loadEnv, getEnv } from './env.js';
 import {
@@ -21,6 +21,7 @@ import {
   getRouterState,
   getSession,
   initDatabase,
+  migrateGroupJid,
   setRegisteredGroup,
   setRouterState,
   setSession,
@@ -274,17 +275,6 @@ function recoverPendingMessages(): void {
   }
 }
 
-function channelFromJid(jid: string): string {
-  const colonIndex = jid.indexOf(':');
-  if (colonIndex === -1) return 'unknown';
-  const prefix = jid.slice(0, colonIndex);
-  const prefixToChannel: Record<string, string> = {
-    tg: 'telegram',
-    mm: 'mattermost',
-  };
-  return prefixToChannel[prefix] ?? 'unknown';
-}
-
 function registerInitialGroupFromEnv(): void {
   const jid = process.env['INITIAL_GROUP_JID'];
   if (!jid) return;
@@ -297,7 +287,7 @@ function registerInitialGroupFromEnv(): void {
   const isMain = process.env['INITIAL_GROUP_IS_MAIN'] !== 'false';
   const config: GroupConfig = {
     jid,
-    name: process.env['INITIAL_GROUP_NAME'] ?? 'Main',
+    name: 'Main',
     folder: process.env['INITIAL_GROUP_FOLDER'] ?? 'main',
     trigger: process.env['INITIAL_GROUP_TRIGGER'] ?? ASSISTANT_NAME,
     channel: channelFromJid(jid),
@@ -342,6 +332,27 @@ async function main(): Promise<void> {
       channel?: string,
       isGroup?: boolean,
     ) => storeChatMetadata(chatJid, timestamp, name, channel, isGroup),
+    onGroupMigrated: (oldJid: string, newJid: string) => {
+      const migrated = migrateGroupJid(oldJid, newJid);
+      if (!migrated) {
+        logger.warn(
+          { oldJid, newJid },
+          'Group migration: old JID not found in DB, skipping',
+        );
+        return;
+      }
+      // Update in-memory map
+      const group = registeredGroups[oldJid];
+      if (group) {
+        delete registeredGroups[oldJid];
+        group.jid = newJid;
+        registeredGroups[newJid] = group;
+      }
+      logger.info(
+        { oldJid, newJid },
+        'Group JID migrated (Telegram supergroup upgrade)',
+      );
+    },
     registeredGroups: () => registeredGroups,
   };
 

@@ -92,17 +92,20 @@ export class TelegramChannel implements Channel {
   private botToken: string;
   private onMessage: OnInboundMessage;
   private onChatMetadata: OnChatMetadata;
+  private onGroupMigrated: (oldJid: string, newJid: string) => void;
   private registeredGroups: () => Record<string, GroupConfig>;
 
   constructor(opts: {
     botToken: string;
     onMessage: OnInboundMessage;
     onChatMetadata: OnChatMetadata;
+    onGroupMigrated: (oldJid: string, newJid: string) => void;
     registeredGroups: () => Record<string, GroupConfig>;
   }) {
     this.botToken = opts.botToken;
     this.onMessage = opts.onMessage;
     this.onChatMetadata = opts.onChatMetadata;
+    this.onGroupMigrated = opts.onGroupMigrated;
     this.registeredGroups = opts.registeredGroups;
   }
 
@@ -131,6 +134,20 @@ export class TelegramChannel implements Channel {
     // /ping — health check
     this.bot.command('ping', (ctx) => {
       ctx.reply(`${ASSISTANT_NAME} is online.`);
+    });
+
+    // Handle group → supergroup migration (chat ID changes)
+    this.bot.on('message:migrate_to_chat_id', (ctx) => {
+      const oldChatId = ctx.chat.id;
+      const newChatId = ctx.message.migrate_to_chat_id;
+      if (!newChatId) return;
+
+      const oldJid = `${JID_PREFIX}${oldChatId}`;
+      const newJid = `${JID_PREFIX}${newChatId}`;
+
+      logger.info({ oldJid, newJid }, 'Telegram group migrated to supergroup');
+
+      this.onGroupMigrated(oldJid, newJid);
     });
 
     // Bot commands that should NOT flow through to the general message handler
@@ -460,6 +477,7 @@ registerChannel('telegram', (opts: ChannelOpts) => {
     botToken: token,
     onMessage: opts.onMessage,
     onChatMetadata: opts.onChatMetadata,
+    onGroupMigrated: opts.onGroupMigrated,
     registeredGroups: opts.registeredGroups,
   });
 });

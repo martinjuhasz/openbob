@@ -235,6 +235,36 @@ export function deleteRegisteredGroup(jid: string): void {
   db.prepare(`DELETE FROM registered_groups WHERE jid = ?`).run(jid);
 }
 
+export function migrateGroupJid(oldJid: string, newJid: string): boolean {
+  const txn = db.transaction(() => {
+    // Defer FK checks so we can update parent+child rows in any order
+    db.pragma('defer_foreign_keys = ON');
+
+    const groupResult = db
+      .prepare(`UPDATE registered_groups SET jid = ? WHERE jid = ?`)
+      .run(newJid, oldJid);
+    if (groupResult.changes === 0) return false;
+
+    // Update chats table
+    db.prepare(`UPDATE chats SET jid = ? WHERE jid = ?`).run(newJid, oldJid);
+
+    // Update messages referencing the old JID
+    db.prepare(`UPDATE messages SET chat_jid = ? WHERE chat_jid = ?`).run(
+      newJid,
+      oldJid,
+    );
+
+    // Update scheduled tasks referencing the old JID
+    db.prepare(`UPDATE scheduled_tasks SET jid = ? WHERE jid = ?`).run(
+      newJid,
+      oldJid,
+    );
+
+    return true;
+  });
+  return txn();
+}
+
 // --- Sessions ---
 
 export function getSession(groupFolder: string): string | null {

@@ -254,6 +254,29 @@ describe('processTaskIpc', () => {
         jid: 'mm:new',
         name: 'New Group',
         folder: 'new-group',
+        channel: 'mattermost',
+      });
+    });
+
+    it('derives telegram channel from tg: prefix', async () => {
+      const deps = makeDeps({});
+      await processTaskIpc(
+        {
+          type: 'register_group',
+          jid: 'tg:-1001234567890',
+          name: 'TG Group',
+          folder: 'tg-group',
+          trigger: 'bot',
+        },
+        'main-group',
+        true,
+        new Map(),
+        deps,
+      );
+      expect(setRegisteredGroup).toHaveBeenCalledOnce();
+      expect(deps.registered[0]).toMatchObject({
+        jid: 'tg:-1001234567890',
+        channel: 'telegram',
       });
     });
 

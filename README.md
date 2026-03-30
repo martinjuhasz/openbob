@@ -95,7 +95,6 @@ INITIAL_GROUP_TRIGGER=yetaclaw
 Optional overrides (sensible defaults are applied):
 
 ```bash
-INITIAL_GROUP_NAME=Main            # display name (default: "Main")
 INITIAL_GROUP_FOLDER=main          # workspace folder (default: "main")
 INITIAL_GROUP_IS_MAIN=true         # admin privileges (default: true)
 ```
@@ -204,7 +203,6 @@ All containers share the `yetaclaw` Docker network. The host reaches agent conta
 | `MATTERMOST_URL`        | Channel   | Mattermost server URL                                           |
 | `MATTERMOST_TOKEN`      | Channel   | Mattermost bot account token                                    |
 | `INITIAL_GROUP_JID`     | First run | Channel JID — prefix determines channel (`tg:` / `mm:`)         |
-| `INITIAL_GROUP_NAME`    | No        | Display name (default: `Main`)                                  |
 | `INITIAL_GROUP_FOLDER`  | No        | Workspace folder name (default: `main`)                         |
 | `INITIAL_GROUP_TRIGGER` | No        | Trigger word (default: assistant name)                          |
 | `INITIAL_GROUP_IS_MAIN` | No        | `true` for admin channel (default: `true`)                      |

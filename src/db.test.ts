@@ -533,3 +533,145 @@ describe('scheduled_tasks', () => {
     });
   });
 });
+
+describe('migrateGroupJid', () => {
+  // Mirrors the transaction in db.ts migrateGroupJid()
+  function migrateGroupJid(oldJid: string, newJid: string): boolean {
+    const txn = db.transaction(() => {
+      db.pragma('defer_foreign_keys = ON');
+
+      const groupResult = db
+        .prepare(`UPDATE registered_groups SET jid = ? WHERE jid = ?`)
+        .run(newJid, oldJid);
+      if (groupResult.changes === 0) return false;
+
+      db.prepare(`UPDATE chats SET jid = ? WHERE jid = ?`).run(newJid, oldJid);
+      db.prepare(`UPDATE messages SET chat_jid = ? WHERE chat_jid = ?`).run(
+        newJid,
+        oldJid,
+      );
+      db.prepare(`UPDATE scheduled_tasks SET jid = ? WHERE jid = ?`).run(
+        newJid,
+        oldJid,
+      );
+
+      return true;
+    });
+    return txn();
+  }
+
+  function insertGroup(jid: string, folder: string) {
+    db.prepare(
+      `INSERT INTO registered_groups (jid,name,folder,trigger,channel,is_main,always_respond,created_at) VALUES (?,?,?,?,?,?,?,?)`,
+    ).run(jid, 'Test', folder, '@bot', 'telegram', 0, 1, 1700000000000);
+  }
+
+  it('migrates registered_groups JID', () => {
+    insertGroup('tg:-5095000864', 'homebase');
+
+    const result = migrateGroupJid('tg:-5095000864', 'tg:-1003898307477');
+    expect(result).toBe(true);
+
+    const old = db
+      .prepare(`SELECT * FROM registered_groups WHERE jid = ?`)
+      .get('tg:-5095000864');
+    expect(old).toBeUndefined();
+
+    const migrated = db
+      .prepare(`SELECT * FROM registered_groups WHERE jid = ?`)
+      .get('tg:-1003898307477') as { jid: string; folder: string };
+    expect(migrated.jid).toBe('tg:-1003898307477');
+    expect(migrated.folder).toBe('homebase');
+  });
+
+  it('migrates chats table', () => {
+    insertGroup('tg:-100', 'grp');
+    storeChatMetadata(
+      'tg:-100',
+      '2026-01-01T10:00:00.000Z',
+      'MyChat',
+      'telegram',
+      true,
+    );
+
+    migrateGroupJid('tg:-100', 'tg:-200');
+
+    const old = db.prepare(`SELECT * FROM chats WHERE jid = ?`).get('tg:-100');
+    expect(old).toBeUndefined();
+
+    const migrated = db
+      .prepare(`SELECT * FROM chats WHERE jid = ?`)
+      .get('tg:-200') as { name: string };
+    expect(migrated.name).toBe('MyChat');
+  });
+
+  it('migrates messages', () => {
+    insertGroup('tg:-100', 'grp');
+    storeChatMetadata('tg:-100', '2026-01-01T10:00:00.000Z');
+    storeMessage({
+      id: 'm1',
+      chat_jid: 'tg:-100',
+      sender: 'u1',
+      sender_name: 'Alice',
+      content: 'hello',
+      timestamp: '2026-01-01T10:00:00.000Z',
+    });
+
+    migrateGroupJid('tg:-100', 'tg:-200');
+
+    const oldMsgs = db
+      .prepare(`SELECT * FROM messages WHERE chat_jid = ?`)
+      .all('tg:-100');
+    expect(oldMsgs).toHaveLength(0);
+
+    const newMsgs = db
+      .prepare(`SELECT * FROM messages WHERE chat_jid = ?`)
+      .all('tg:-200') as Array<{ content: string }>;
+    expect(newMsgs).toHaveLength(1);
+    expect(newMsgs[0]?.content).toBe('hello');
+  });
+
+  it('migrates scheduled_tasks', () => {
+    insertGroup('tg:-100', 'grp');
+    db.prepare(
+      `INSERT INTO scheduled_tasks (id,jid,group_folder,prompt,schedule_type,schedule_value,context_mode,status,next_run,created_at,created_by) VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+    ).run(
+      't1',
+      'tg:-100',
+      'grp',
+      'do stuff',
+      'cron',
+      '0 9 * * *',
+      'isolated',
+      'active',
+      9999999999,
+      1700000000000,
+      'bot',
+    );
+
+    migrateGroupJid('tg:-100', 'tg:-200');
+
+    const task = db
+      .prepare(`SELECT * FROM scheduled_tasks WHERE id = ?`)
+      .get('t1') as { jid: string };
+    expect(task.jid).toBe('tg:-200');
+  });
+
+  it('returns false when old JID does not exist', () => {
+    const result = migrateGroupJid('tg:-nonexistent', 'tg:-200');
+    expect(result).toBe(false);
+  });
+
+  it('does not affect other groups', () => {
+    insertGroup('tg:-100', 'grp-a');
+    insertGroup('tg:-999', 'grp-b');
+
+    migrateGroupJid('tg:-100', 'tg:-200');
+
+    const other = db
+      .prepare(`SELECT * FROM registered_groups WHERE jid = ?`)
+      .get('tg:-999') as { jid: string; folder: string };
+    expect(other.jid).toBe('tg:-999');
+    expect(other.folder).toBe('grp-b');
+  });
+});

@@ -32,7 +32,6 @@ services:
       - DATA_PATH=${DATA_PATH}
       # Initial group registration (first run — leave empty to skip)
       - INITIAL_GROUP_JID=${INITIAL_GROUP_JID:-}
-      - INITIAL_GROUP_NAME=${INITIAL_GROUP_NAME:-Main}
       - INITIAL_GROUP_FOLDER=${INITIAL_GROUP_FOLDER:-main}
       - INITIAL_GROUP_TRIGGER=${INITIAL_GROUP_TRIGGER:-yetaclaw}
       - INITIAL_GROUP_IS_MAIN=${INITIAL_GROUP_IS_MAIN:-true}
