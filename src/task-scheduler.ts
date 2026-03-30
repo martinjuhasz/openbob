@@ -112,6 +112,10 @@ async function runTask(
         { taskId: task.id, error: output.error },
         'Task agent error',
       );
+      await deps.sendMessage(
+        task.jid,
+        '_Keine Antwort generiert — bitte erneut versuchen._',
+      );
     }
     // eslint-disable-next-line no-catch-all/no-catch-all -- isolate task failure from scheduler
   } catch (err) {
