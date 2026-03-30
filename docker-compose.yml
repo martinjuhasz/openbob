@@ -1,5 +1,4 @@
 services:
-
   yetaclaw-host:
     build:
       context: .
@@ -8,14 +7,16 @@ services:
     container_name: yetaclaw-host
     restart: unless-stopped
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock   # Spawn agent containers
-      - ${DATA_PATH}:/data                           # DB + IPC + opencode config
-      - ./workspace:/workspace                       # Shared workspace
+      - /var/run/docker.sock:/var/run/docker.sock # Spawn agent containers
+      - ${DATA_PATH}:/data # DB + IPC + opencode config
+      - ./workspace:/workspace # Shared workspace
       - ./skills:/skills:ro
     environment:
       # Mattermost
-      - MATTERMOST_URL=${MATTERMOST_URL}
-      - MATTERMOST_TOKEN=${MATTERMOST_TOKEN}
+      - MATTERMOST_URL=${MATTERMOST_URL:-}
+      - MATTERMOST_TOKEN=${MATTERMOST_TOKEN:-}
+      # Telegram
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
       # Model — format: providerID/modelID
       - MODEL=${MODEL:-anthropic/claude-sonnet-4-6}
       # API keys — forwarded to agent containers via client.auth.set()
@@ -64,8 +65,8 @@ services:
     container_name: yetaclaw-openviking
     restart: unless-stopped
     ports:
-      - "1933:1933"                                  # API
-      - "8020:8020"                                  # Web console: http://localhost:8020
+      - '1933:1933' # API
+      - '8020:8020' # Web console: http://localhost:8020
     volumes:
       - ${DATA_PATH}/openviking:/data
     environment:
