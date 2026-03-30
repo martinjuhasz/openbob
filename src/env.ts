@@ -1,9 +1,12 @@
 import { z } from 'zod';
 
 const envSchema = z.object({
-  // Mattermost
-  MATTERMOST_URL: z.string().url(),
-  MATTERMOST_TOKEN: z.string().min(1),
+  // Mattermost (optional — only needed if Mattermost channel is used)
+  MATTERMOST_URL: z.string().url().optional(),
+  MATTERMOST_TOKEN: z.string().min(1).optional(),
+
+  // Telegram (optional — only needed if Telegram channel is used)
+  TELEGRAM_BOT_TOKEN: z.string().min(1).optional(),
 
   // Model — format: providerID/modelID, e.g. anthropic/claude-sonnet-4-6
   // Required — the model name is provider-specific, no sensible default exists.

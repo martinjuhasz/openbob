@@ -22,6 +22,12 @@ import { GroupConfig, ScheduledTask } from './types.js';
 
 export interface IpcDeps {
   sendMessage: (jid: string, text: string) => Promise<void>;
+  sendPhoto: (jid: string, source: string, caption?: string) => Promise<void>;
+  sendDocument: (
+    jid: string,
+    source: string,
+    caption?: string,
+  ) => Promise<void>;
   registeredGroups: () => Record<string, GroupConfig>;
   onTasksChanged: () => void;
   onGroupRegistered: (config: GroupConfig) => void;
@@ -93,6 +99,52 @@ export function startIpcWatcher(deps: IpcDeps): void {
                   logger.warn(
                     { chatJid: data.chatJid, sourceGroup },
                     'Unauthorized IPC message attempt blocked',
+                  );
+                }
+              } else if (
+                data.type === 'send_photo' &&
+                data.chatJid &&
+                data.source
+              ) {
+                const targetGroup = registeredGroups[data.chatJid];
+                if (
+                  isMain ||
+                  (targetGroup && targetGroup.folder === sourceGroup)
+                ) {
+                  await deps.sendPhoto(data.chatJid, data.source, data.caption);
+                  logger.info(
+                    { chatJid: data.chatJid, source: data.source, sourceGroup },
+                    'IPC photo sent',
+                  );
+                } else {
+                  logger.warn(
+                    { chatJid: data.chatJid, sourceGroup },
+                    'Unauthorized IPC send_photo attempt blocked',
+                  );
+                }
+              } else if (
+                data.type === 'send_document' &&
+                data.chatJid &&
+                data.source
+              ) {
+                const targetGroup = registeredGroups[data.chatJid];
+                if (
+                  isMain ||
+                  (targetGroup && targetGroup.folder === sourceGroup)
+                ) {
+                  await deps.sendDocument(
+                    data.chatJid,
+                    data.source,
+                    data.caption,
+                  );
+                  logger.info(
+                    { chatJid: data.chatJid, source: data.source, sourceGroup },
+                    'IPC document sent',
+                  );
+                } else {
+                  logger.warn(
+                    { chatJid: data.chatJid, sourceGroup },
+                    'Unauthorized IPC send_document attempt blocked',
                   );
                 }
               }

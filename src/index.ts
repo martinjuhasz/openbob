@@ -372,6 +372,24 @@ async function main(): Promise<void> {
       if (!channel) throw new Error(`No channel for JID: ${jid}`);
       return channel.sendMessage(jid, text);
     },
+    sendPhoto: (jid, source, caption) => {
+      const channel = findChannel(channels, jid);
+      if (!channel) throw new Error(`No channel for JID: ${jid}`);
+      if (!channel.sendPhoto) {
+        logger.warn({ jid }, 'Channel does not support sendPhoto');
+        return Promise.resolve();
+      }
+      return channel.sendPhoto(jid, source, caption);
+    },
+    sendDocument: (jid, source, caption) => {
+      const channel = findChannel(channels, jid);
+      if (!channel) throw new Error(`No channel for JID: ${jid}`);
+      if (!channel.sendDocument) {
+        logger.warn({ jid }, 'Channel does not support sendDocument');
+        return Promise.resolve();
+      }
+      return channel.sendDocument(jid, source, caption);
+    },
     registeredGroups: () => registeredGroups,
     onTasksChanged: () => {
       logger.debug('Tasks changed via IPC');

@@ -57,21 +57,33 @@ function makeGroup(overrides: Partial<GroupConfig> = {}): GroupConfig {
 
 function makeDeps(groups: Record<string, GroupConfig> = {}): IpcDeps & {
   sent: string[];
+  photosSent: Array<{ source: string; caption?: string }>;
+  documentsSent: Array<{ source: string; caption?: string }>;
   tasksChanged: number[];
   registered: GroupConfig[];
   updated: GroupConfig[];
 } {
   const sent: string[] = [];
+  const photosSent: Array<{ source: string; caption?: string }> = [];
+  const documentsSent: Array<{ source: string; caption?: string }> = [];
   const tasksChanged: number[] = [];
   const registered: GroupConfig[] = [];
   const updated: GroupConfig[] = [];
   return {
     sent,
+    photosSent,
+    documentsSent,
     tasksChanged,
     registered,
     updated,
     sendMessage: async (_jid, text) => {
       sent.push(text);
+    },
+    sendPhoto: async (_jid, source, caption) => {
+      photosSent.push({ source, caption });
+    },
+    sendDocument: async (_jid, source, caption) => {
+      documentsSent.push({ source, caption });
     },
     registeredGroups: () => groups,
     onTasksChanged: () => {
