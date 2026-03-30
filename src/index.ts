@@ -54,6 +54,7 @@ function loadState(): void {
   const agentTs = getRouterState('last_agent_timestamp');
   try {
     lastAgentTimestamp = agentTs ? JSON.parse(agentTs) : {};
+    // eslint-disable-next-line no-catch-all/no-catch-all -- corrupted state: reset and continue
   } catch {
     logger.warn('Corrupted last_agent_timestamp in DB, resetting');
     lastAgentTimestamp = {};
@@ -189,6 +190,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     }
 
     return true;
+    // eslint-disable-next-line no-catch-all/no-catch-all -- top-level handler: trigger failure recovery
   } catch (err) {
     logger.error(
       { group: group.name, err, failCount: (agentFailCount[chatJid] ?? 0) + 1 },
@@ -250,6 +252,7 @@ async function startMessageLoop(): Promise<void> {
           }
         }
       }
+      // eslint-disable-next-line no-catch-all/no-catch-all -- loop resilience: don't crash poll loop
     } catch (err) {
       logger.error({ err }, 'Error in message loop');
     }

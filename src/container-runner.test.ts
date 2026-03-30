@@ -104,7 +104,9 @@ describe('container-runner', () => {
     mockExecFileSync.mockReturnValue(Buffer.from(''));
     mockFs.existsSync.mockReturnValue(false);
     mockFs.readFileSync.mockImplementation(() => {
-      throw new Error('ENOENT');
+      const err: NodeJS.ErrnoException = new Error('ENOENT');
+      err.code = 'ENOENT';
+      throw err;
     });
   });
 
@@ -272,7 +274,9 @@ describe('container-runner', () => {
 
       // No existing opencode.json → readFileSync throws
       mockFs.readFileSync.mockImplementation(() => {
-        throw new Error('ENOENT');
+        const err: NodeJS.ErrnoException = new Error('ENOENT');
+        err.code = 'ENOENT';
+        throw err;
       });
 
       const { warmUpContainers } = await importRunner();
@@ -325,7 +329,9 @@ describe('container-runner', () => {
       mockFs.readFileSync.mockImplementation((p: string) => {
         if (typeof p === 'string' && p.endsWith('opencode.json'))
           return JSON.stringify(existingConfig);
-        throw new Error('ENOENT');
+        const err: NodeJS.ErrnoException = new Error('ENOENT');
+        err.code = 'ENOENT';
+        throw err;
       });
 
       const { warmUpContainers } = await importRunner();

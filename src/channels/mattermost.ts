@@ -110,8 +110,9 @@ export class MattermostChannel implements Channel {
     let post: MattermostPost;
     try {
       post = JSON.parse(postJson) as MattermostPost;
-    } catch {
-      return;
+    } catch (err) {
+      if (err instanceof SyntaxError) return;
+      throw err;
     }
 
     // Ignore own messages and system messages
@@ -132,8 +133,9 @@ export class MattermostChannel implements Channel {
       senderName =
         [user.first_name, user.last_name].filter(Boolean).join(' ') ||
         user.username;
+      // eslint-disable-next-line no-catch-all/no-catch-all -- fallback to user_id when user lookup fails
     } catch {
-      // fallback to user_id
+      // intentionally empty: senderName stays as user_id
     }
 
     const timestamp = new Date(post.create_at).toISOString();
@@ -192,7 +194,6 @@ export class MattermostChannel implements Channel {
     logger.info('Mattermost disconnected');
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private async api<T = unknown>(
     path: string,
     method = 'GET',

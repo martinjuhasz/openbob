@@ -34,6 +34,7 @@ async function sendTelegramMessage(
 ): Promise<void> {
   try {
     await api.sendMessage(chatId, text, { parse_mode: 'Markdown' });
+    // eslint-disable-next-line no-catch-all/no-catch-all -- Markdown fallback to plain text
   } catch (_err) {
     // Fallback: send as plain text if Markdown parsing fails
     logger.debug(
@@ -285,6 +286,7 @@ export class TelegramChannel implements Channel {
         } else {
           storeNonText(ctx, '[Photo - download failed]');
         }
+        // eslint-disable-next-line no-catch-all/no-catch-all -- graceful degradation for photo download
       } catch (err) {
         logger.warn(
           { err },
@@ -349,6 +351,7 @@ export class TelegramChannel implements Channel {
         }
       }
       logger.info({ jid, length: text.length }, 'Telegram message sent');
+      // eslint-disable-next-line no-catch-all/no-catch-all -- fire-and-forget delivery
     } catch (err) {
       logger.error({ jid, err }, 'Failed to send Telegram message');
     }
@@ -380,6 +383,7 @@ export class TelegramChannel implements Channel {
         );
       }
       logger.info({ jid, source }, 'Telegram photo sent');
+      // eslint-disable-next-line no-catch-all/no-catch-all -- fire-and-forget delivery
     } catch (err) {
       logger.error({ jid, source, err }, 'Failed to send Telegram photo');
     }
@@ -411,6 +415,7 @@ export class TelegramChannel implements Channel {
         );
       }
       logger.info({ jid, source }, 'Telegram document sent');
+      // eslint-disable-next-line no-catch-all/no-catch-all -- fire-and-forget delivery
     } catch (err) {
       logger.error({ jid, source, err }, 'Failed to send Telegram document');
     }
@@ -437,6 +442,7 @@ export class TelegramChannel implements Channel {
     try {
       const numericId = jid.replace(JID_PREFIX, '');
       await this.bot.api.sendChatAction(numericId, 'typing');
+      // eslint-disable-next-line no-catch-all/no-catch-all -- non-critical typing indicator
     } catch (err) {
       logger.debug({ jid, err }, 'Failed to send Telegram typing indicator');
     }

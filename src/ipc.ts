@@ -53,6 +53,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
         const stat = fs.statSync(path.join(ipcBaseDir, f));
         return stat.isDirectory() && f !== 'errors';
       });
+      // eslint-disable-next-line no-catch-all/no-catch-all -- poll loop: retry on next interval
     } catch (err) {
       logger.error({ err }, 'Error reading IPC base directory');
       setTimeout(processIpcFiles, POLL_INTERVAL);
@@ -149,6 +150,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
                 }
               }
               fs.unlinkSync(filePath);
+              // eslint-disable-next-line no-catch-all/no-catch-all -- isolate per-message failure
             } catch (err) {
               logger.error(
                 { file, sourceGroup, err },
@@ -158,6 +160,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
             }
           }
         }
+        // eslint-disable-next-line no-catch-all/no-catch-all -- isolate per-group message dir failure
       } catch (err) {
         logger.error(
           { err, sourceGroup },
@@ -183,6 +186,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
                 deps,
               );
               fs.unlinkSync(filePath);
+              // eslint-disable-next-line no-catch-all/no-catch-all -- isolate per-task failure
             } catch (err) {
               logger.error(
                 { file, sourceGroup, err },
@@ -192,6 +196,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
             }
           }
         }
+        // eslint-disable-next-line no-catch-all/no-catch-all -- isolate per-group task dir failure
       } catch (err) {
         logger.error({ err, sourceGroup }, 'Error reading IPC tasks directory');
       }
@@ -214,8 +219,9 @@ function moveToErrors(
     const errorDir = path.join(ipcBaseDir, 'errors');
     fs.mkdirSync(errorDir, { recursive: true });
     fs.renameSync(filePath, path.join(errorDir, `${sourceGroup}-${file}`));
+    // eslint-disable-next-line no-catch-all/no-catch-all -- last-ditch: ignore rename errors
   } catch {
-    // ignore rename errors
+    // intentionally empty: rename failure is non-critical
   }
 }
 
@@ -286,6 +292,7 @@ export async function processTaskIpc(
         try {
           const interval = CronExpressionParser.parse(data.scheduleValue);
           nextRun = interval.next().getTime();
+          // eslint-disable-next-line no-catch-all/no-catch-all -- invalid cron from agent input
         } catch {
           logger.warn(
             { scheduleValue: data.scheduleValue },
@@ -404,6 +411,7 @@ export async function processTaskIpc(
           try {
             const interval = CronExpressionParser.parse(task.schedule_value);
             next_run = interval.next().getTime();
+            // eslint-disable-next-line no-catch-all/no-catch-all -- invalid cron from DB
           } catch {
             next_run = now + 60_000;
           }
@@ -482,6 +490,7 @@ export async function processTaskIpc(
           try {
             const interval = CronExpressionParser.parse(newValue);
             fields.next_run = interval.next().getTime();
+            // eslint-disable-next-line no-catch-all/no-catch-all -- invalid cron from agent input
           } catch {
             logger.warn(
               { taskId: data.taskId, scheduleValue: newValue },

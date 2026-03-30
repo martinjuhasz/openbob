@@ -31,6 +31,7 @@ export function computeNextRun(task: ScheduledTask): number | null {
     try {
       const interval = CronExpressionParser.parse(task.schedule_value);
       return interval.next().getTime();
+      // eslint-disable-next-line no-catch-all/no-catch-all -- invalid cron from DB: fallback to retry delay
     } catch {
       logger.warn(
         { taskId: task.id, value: task.schedule_value },
@@ -112,6 +113,7 @@ async function runTask(
         'Task agent error',
       );
     }
+    // eslint-disable-next-line no-catch-all/no-catch-all -- isolate task failure from scheduler
   } catch (err) {
     logger.error({ taskId: task.id, err }, 'Task failed');
   }
@@ -145,6 +147,7 @@ export function startSchedulerLoop(deps: SchedulerDeps): void {
       for (const task of dueTasks) {
         deps.queue.enqueueTask(task.jid, task.id, () => runTask(task, deps));
       }
+      // eslint-disable-next-line no-catch-all/no-catch-all -- loop resilience: don't crash scheduler
     } catch (err) {
       logger.error({ err }, 'Error in scheduler loop');
     }

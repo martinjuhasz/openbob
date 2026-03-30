@@ -36,8 +36,16 @@ function readOvUserKey(): string | null {
     _ovUserKey = fs
       .readFileSync(path.join(DATA_DIR, 'openviking', 'ov_user.key'), 'utf-8')
       .trim();
-  } catch {
-    _ovUserKey = null;
+  } catch (err) {
+    if (
+      err instanceof Error &&
+      'code' in err &&
+      (err as NodeJS.ErrnoException).code === 'ENOENT'
+    ) {
+      _ovUserKey = null;
+    } else {
+      throw err;
+    }
   }
   if (!_ovUserKey)
     logger.warn(
@@ -105,6 +113,7 @@ async function resolveHostPaths(): Promise<void> {
       { WORKSPACE_PATH_HOST, SKILLS_PATH_HOST },
       'Resolved host paths via docker inspect',
     );
+    // eslint-disable-next-line no-catch-all/no-catch-all -- fallback: skip mounts if docker inspect fails
   } catch (err) {
     logger.warn(
       { err },
@@ -212,8 +221,17 @@ function writeOpencodeConfig(groupFolder: string, model: string): void {
   try {
     const existing = fs.readFileSync(configPath, 'utf-8');
     config = JSON.parse(existing) as Record<string, unknown>;
-  } catch {
-    // No existing file or invalid JSON — start fresh
+  } catch (err) {
+    if (
+      err instanceof SyntaxError ||
+      (err instanceof Error &&
+        'code' in err &&
+        (err as NodeJS.ErrnoException).code === 'ENOENT')
+    ) {
+      // No existing file or invalid JSON — start fresh
+    } else {
+      throw err;
+    }
   }
 
   // Set default model — top-level "model" key, format: "providerID/modelID"
@@ -361,6 +379,7 @@ async function waitForServer(containerName: string): Promise<void> {
       if (res.ok) return;
       const body = await res.text().catch(() => '');
       lastError = `HTTP ${res.status} ${res.statusText}: ${body.slice(0, 500)}`;
+      // eslint-disable-next-line no-catch-all/no-catch-all -- expected during container boot
     } catch (err) {
       lastError =
         err instanceof Error ? `${err.name}: ${err.message}` : String(err);
@@ -463,6 +482,7 @@ async function getAgentContainer(
       try {
         execFileSync(DOCKER, ['inspect', existing], { stdio: 'pipe' });
         return existing;
+        // eslint-disable-next-line no-catch-all/no-catch-all -- container gone, clean up and re-spawn
       } catch {
         activeContainers.delete(groupFolder);
         containerModels.delete(groupFolder);
@@ -525,6 +545,7 @@ export async function runAgentSession(
   let agentName: string;
   try {
     agentName = await getAgentContainer(groupFolder, model);
+    // eslint-disable-next-line no-catch-all/no-catch-all -- return error status instead of crashing
   } catch (err) {
     logger.error({ groupFolder, err }, 'Failed to get agent container');
     return { status: 'error', result: null, error: String(err) };
@@ -591,7 +612,7 @@ export async function runAgentSession(
     // If the session is still busy from a previous interrupted run, wait briefly then abandon
     {
       const preStatus = await client.session.status().catch(() => null);
-      if ((preStatus?.data as any)?.[sessionId]?.type === 'busy') {
+      if (preStatus?.data?.[sessionId]?.type === 'busy') {
         logger.warn(
           { groupFolder, sessionId },
           'Session still busy before prompt — waiting up to 10s',
@@ -600,12 +621,11 @@ export async function runAgentSession(
         while (Date.now() < busyDeadline) {
           await new Promise((r) => setTimeout(r, 1_000));
           const s = await client.session.status().catch(() => null);
-          if ((s?.data as any)?.[sessionId]?.type !== 'busy') break;
+          if (s?.data?.[sessionId]?.type !== 'busy') break;
         }
         const stillBusy =
-          ((await client.session.status().catch(() => null))?.data as any)?.[
-            sessionId
-          ]?.type === 'busy';
+          (await client.session.status().catch(() => null))?.data?.[sessionId]
+            ?.type === 'busy';
         if (stillBusy) {
           logger.warn(
             { groupFolder, sessionId },
@@ -672,6 +692,7 @@ export async function runAgentSession(
             'OpenViking: no relevant memories found',
           );
         }
+        // eslint-disable-next-line no-catch-all/no-catch-all -- OpenViking recall is optional
       } catch (err) {
         logger.warn(
           { err },
@@ -741,14 +762,10 @@ export async function runAgentSession(
     logger.info({ groupFolder, sessionId, pollExitReason }, 'Poll loop exited');
 
     // Fetch messages and find last assistant message
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const messagesRes = (await client.session.messages({
+    const messagesRes = await client.session.messages({
       path: { id: sessionId },
-    })) as any;
-    const messages: Array<{
-      info: { role: string; error?: unknown };
-      parts: Array<{ type: string; text?: string }>;
-    }> = messagesRes.data ?? [];
+    });
+    const messages = messagesRes.data ?? [];
 
     // Find last assistant message (in reverse)
     const assistantMsg = [...messages]
@@ -773,12 +790,17 @@ export async function runAgentSession(
     }
 
     // Check for model/auth error
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const msgError = (assistantMsg.info as any)?.error;
+    const msgError =
+      assistantMsg.info.role === 'assistant'
+        ? assistantMsg.info.error
+        : undefined;
     if (msgError) {
       const errMsg =
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (msgError as any)?.data?.message ?? JSON.stringify(msgError);
+        'data' in msgError && msgError.data
+          ? 'message' in msgError.data
+            ? String(msgError.data.message)
+            : JSON.stringify(msgError)
+          : JSON.stringify(msgError);
       logger.error(
         { groupFolder, sessionId, msgError },
         'OpenCode model/auth error',
@@ -787,7 +809,10 @@ export async function runAgentSession(
     }
 
     const text = (assistantMsg.parts ?? [])
-      .filter((p) => p.type === 'text' && p.text)
+      .filter(
+        (p): p is typeof p & { type: 'text'; text: string } =>
+          p.type === 'text' && 'text' in p,
+      )
       .map((p) => p.text)
       .join('');
 
@@ -825,6 +850,7 @@ export async function runAgentSession(
           { groupFolder, sessionId, chars: text.length },
           'OpenViking: stored assistant response',
         );
+        // eslint-disable-next-line no-catch-all/no-catch-all -- OpenViking commit is optional
       } catch (err) {
         logger.warn({ err }, 'OpenViking commit failed');
       }
@@ -832,6 +858,7 @@ export async function runAgentSession(
 
     touchContainer(groupFolder);
     return { status: 'success', result: text, newSessionId: sessionId };
+    // eslint-disable-next-line no-catch-all/no-catch-all -- return error status instead of crashing
   } catch (err) {
     logger.error({ groupFolder, sessionId, err }, 'OpenCode session error');
     touchContainer(groupFolder);
@@ -854,6 +881,7 @@ export async function warmUpContainers(
       try {
         await getAgentContainer(folder, model);
         logger.info({ folder }, 'Agent container pre-warmed');
+        // eslint-disable-next-line no-catch-all/no-catch-all -- pre-warm is best-effort
       } catch (err) {
         logger.warn(
           { folder, err },
@@ -883,6 +911,7 @@ export async function cleanupStoppedContainers(): Promise<void> {
     if (ids.length === 0) return;
     await execFileAsync(DOCKER, ['rm', ...ids]).catch(() => {});
     logger.info({ count: ids.length }, 'Removed stopped agent containers');
+    // eslint-disable-next-line no-catch-all/no-catch-all -- Docker cleanup is best-effort
   } catch {
     // Docker not available or no containers — ignore
   }
@@ -907,6 +936,7 @@ export async function cleanupAllAgentContainers(): Promise<void> {
       { count: ids.length },
       'Removed all agent containers before prewarming',
     );
+    // eslint-disable-next-line no-catch-all/no-catch-all -- Docker cleanup is best-effort
   } catch {
     // Docker not available or no containers — ignore
   }
