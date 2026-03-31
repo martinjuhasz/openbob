@@ -2,43 +2,63 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // --- grammy mock -------------------------------------------------------
 // vi.hoisted ensures the mock classes are available when vi.mock factory runs
-const { MockBot, mockApi, registerChannelSpy, mockCreateReadStream } =
-  vi.hoisted(() => {
-    const mockApi = {
-      sendMessage: vi.fn().mockResolvedValue({}),
-      sendPhoto: vi.fn().mockResolvedValue({}),
-      sendDocument: vi.fn().mockResolvedValue({}),
-      sendChatAction: vi.fn().mockResolvedValue(true),
-    };
+const {
+  MockBot,
+  mockApi,
+  registerChannelSpy,
+  mockCreateReadStream,
+  mockMkdirSync,
+  mockWriteFileSync,
+  mockFetch,
+} = vi.hoisted(() => {
+  const mockApi = {
+    sendMessage: vi.fn().mockResolvedValue({}),
+    sendPhoto: vi.fn().mockResolvedValue({}),
+    sendDocument: vi.fn().mockResolvedValue({}),
+    sendChatAction: vi.fn().mockResolvedValue(true),
+  };
 
-    class MockBot {
-      api = mockApi;
-      command = vi.fn();
-      on = vi.fn();
-      catch = vi.fn();
-      start = vi
-        .fn()
-        .mockImplementation(
-          (opts?: {
-            onStart?: (info: { username: string; id: number }) => void;
-          }) => {
-            opts?.onStart?.({ username: 'test_bot', id: 12345 });
-            return Promise.resolve();
-          },
-        );
-      stop = vi.fn();
-    }
-
-    // Capture registerChannel calls before clearAllMocks
-    const registerChannelSpy = vi.fn();
-
-    // fs.createReadStream mock — needs to survive clearAllMocks via hoisting
-    const mockCreateReadStream = vi
+  class MockBot {
+    api = mockApi;
+    command = vi.fn();
+    on = vi.fn();
+    catch = vi.fn();
+    start = vi
       .fn()
-      .mockReturnValue({ pipe: vi.fn() } as unknown);
+      .mockImplementation(
+        (opts?: {
+          onStart?: (info: { username: string; id: number }) => void;
+        }) => {
+          opts?.onStart?.({ username: 'test_bot', id: 12345 });
+          return Promise.resolve();
+        },
+      );
+    stop = vi.fn();
+  }
 
-    return { MockBot, mockApi, registerChannelSpy, mockCreateReadStream };
-  });
+  // Capture registerChannel calls before clearAllMocks
+  const registerChannelSpy = vi.fn();
+
+  // fs mocks — need to survive clearAllMocks via hoisting
+  const mockCreateReadStream = vi
+    .fn()
+    .mockReturnValue({ pipe: vi.fn() } as unknown);
+  const mockMkdirSync = vi.fn();
+  const mockWriteFileSync = vi.fn();
+
+  // Global fetch mock for downloadTelegramFile
+  const mockFetch = vi.fn();
+
+  return {
+    MockBot,
+    mockApi,
+    registerChannelSpy,
+    mockCreateReadStream,
+    mockMkdirSync,
+    mockWriteFileSync,
+    mockFetch,
+  };
+});
 
 vi.mock('grammy', () => ({
   Bot: MockBot,
@@ -64,12 +84,12 @@ vi.mock('fs', async (importOriginal) => {
     default: {
       ...defaultExport,
       createReadStream: mockCreateReadStream,
-      mkdirSync: vi.fn(),
-      writeFileSync: vi.fn(),
+      mkdirSync: mockMkdirSync,
+      writeFileSync: mockWriteFileSync,
     },
     createReadStream: mockCreateReadStream,
-    mkdirSync: vi.fn(),
-    writeFileSync: vi.fn(),
+    mkdirSync: mockMkdirSync,
+    writeFileSync: mockWriteFileSync,
   };
 });
 
@@ -86,7 +106,7 @@ vi.mock('./registry.js', () => ({
 // Mock config
 vi.mock('../config.js', () => ({
   ASSISTANT_NAME: 'yetaclaw',
-  GROUPS_DIR: '/workspace/groups',
+  DATA_DIR: '/test-data',
 }));
 
 import { TelegramChannel } from './telegram.js';
@@ -103,6 +123,7 @@ const baseOpts = {
 describe('TelegramChannel', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.stubGlobal('fetch', mockFetch);
   });
 
   describe('ownsJid', () => {
@@ -837,6 +858,449 @@ describe('TelegramChannel', () => {
       );
       await handler(baseCtx);
       expect(onMessage).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('photo download handler', () => {
+    const group: GroupConfig = {
+      jid: 'tg:999',
+      folder: 'test',
+      name: 'Test',
+      trigger: 'yetaclaw',
+      channel: 'telegram',
+      isMain: false,
+      alwaysRespond: false,
+      createdAt: Date.now(),
+    };
+    const groups = { 'tg:999': group };
+
+    async function getPhotoHandler(g: Record<string, GroupConfig> = groups) {
+      const onMessage = vi.fn();
+      const ch = new TelegramChannel({
+        ...baseOpts,
+        onMessage,
+        onChatMetadata: vi.fn(),
+        registeredGroups: () => g,
+      });
+      await ch.connect();
+      const bot = (ch as unknown as { bot: InstanceType<typeof MockBot> }).bot;
+      const handler = bot.on.mock.calls.find(
+        (c: unknown[]) => c[0] === 'message:photo',
+      )?.[1] as (ctx: unknown) => Promise<void>;
+      return { handler, onMessage };
+    }
+
+    function mockSuccessfulDownload() {
+      const fileBytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
+      mockFetch
+        // First call: getFile API
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              ok: true,
+              result: { file_path: 'photos/file_42.jpg' },
+            }),
+        })
+        // Second call: file download
+        .mockResolvedValueOnce({
+          ok: true,
+          arrayBuffer: () => Promise.resolve(fileBytes.buffer),
+        });
+      return fileBytes;
+    }
+
+    it('downloads photo, saves to data dir, and stores container path', async () => {
+      const fileBytes = mockSuccessfulDownload();
+      const { handler, onMessage } = await getPhotoHandler();
+
+      await handler({
+        chat: { id: 999, type: 'group', title: 'Test' },
+        from: { id: 42, first_name: 'Alice' },
+        message: {
+          date: Math.floor(Date.now() / 1000),
+          message_id: 50,
+          photo: [
+            { file_id: 'small_id', width: 90, height: 90 },
+            { file_id: 'large_id', width: 800, height: 600, file_size: 12345 },
+          ],
+        },
+      });
+
+      // Should call getFile API with the largest photo (last element)
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+      const getFileUrl = mockFetch.mock.calls[0]?.[0] as string;
+      expect(getFileUrl).toContain('file_id=large_id');
+      expect(getFileUrl).toContain('bot' + 'test-bot-token');
+
+      // Should create the directory
+      expect(mockMkdirSync).toHaveBeenCalledWith('/test-data/telegram/files', {
+        recursive: true,
+      });
+
+      // Should write the file with correct content
+      expect(mockWriteFileSync).toHaveBeenCalledOnce();
+      const writePath = mockWriteFileSync.mock.calls[0]?.[0] as string;
+      expect(writePath).toMatch(/^\/test-data\/telegram\/files\/photo_50_/);
+      expect(writePath).toMatch(/\.jpg$/);
+      const writtenBuffer = mockWriteFileSync.mock.calls[0]?.[1] as Buffer;
+      expect([...writtenBuffer]).toEqual([...fileBytes]);
+
+      // Message content should reference container path
+      const content = onMessage.mock.calls[0]?.[1]?.content as string;
+      expect(content).toMatch(
+        /^\[Photo: \/workspace\/data\/telegram\/files\/photo_50_\d+\.jpg\]$/,
+      );
+    });
+
+    it('stores failure placeholder when getFile API fails', async () => {
+      mockFetch.mockResolvedValueOnce({ ok: false, status: 500 });
+      const { handler, onMessage } = await getPhotoHandler();
+
+      await handler({
+        chat: { id: 999, type: 'group', title: 'Test' },
+        from: { id: 42, first_name: 'Alice' },
+        message: {
+          date: Math.floor(Date.now() / 1000),
+          message_id: 51,
+          photo: [{ file_id: 'some_id', width: 800, height: 600 }],
+        },
+      });
+
+      expect(mockWriteFileSync).not.toHaveBeenCalled();
+      expect(onMessage).toHaveBeenCalledWith(
+        'tg:999',
+        expect.objectContaining({ content: '[Photo - download failed]' }),
+      );
+    });
+
+    it('stores failure placeholder when file download fails', async () => {
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              ok: true,
+              result: { file_path: 'photos/file.jpg' },
+            }),
+        })
+        .mockResolvedValueOnce({ ok: false, status: 404 });
+
+      const { handler, onMessage } = await getPhotoHandler();
+
+      await handler({
+        chat: { id: 999, type: 'group', title: 'Test' },
+        from: { id: 42, first_name: 'Alice' },
+        message: {
+          date: Math.floor(Date.now() / 1000),
+          message_id: 52,
+          photo: [{ file_id: 'some_id', width: 800, height: 600 }],
+        },
+      });
+
+      expect(mockWriteFileSync).not.toHaveBeenCalled();
+      expect(onMessage).toHaveBeenCalledWith(
+        'tg:999',
+        expect.objectContaining({ content: '[Photo - download failed]' }),
+      );
+    });
+
+    it('stores plain [Photo] when photo array is empty', async () => {
+      const { handler, onMessage } = await getPhotoHandler();
+
+      await handler({
+        chat: { id: 999, type: 'group', title: 'Test' },
+        from: { id: 42, first_name: 'Alice' },
+        message: {
+          date: Math.floor(Date.now() / 1000),
+          message_id: 53,
+          photo: [],
+        },
+      });
+
+      expect(mockFetch).not.toHaveBeenCalled();
+      expect(onMessage).toHaveBeenCalledWith(
+        'tg:999',
+        expect.objectContaining({ content: '[Photo]' }),
+      );
+    });
+
+    it('includes caption with downloaded photo', async () => {
+      mockSuccessfulDownload();
+      const { handler, onMessage } = await getPhotoHandler();
+
+      await handler({
+        chat: { id: 999, type: 'group', title: 'Test' },
+        from: { id: 42, first_name: 'Alice' },
+        message: {
+          date: Math.floor(Date.now() / 1000),
+          message_id: 54,
+          caption: 'Look at this',
+          photo: [{ file_id: 'pic_id', width: 800, height: 600 }],
+        },
+      });
+
+      const content = onMessage.mock.calls[0]?.[1]?.content as string;
+      expect(content).toMatch(/^\[Photo: \/workspace\/data\/telegram\/files\//);
+      expect(content).toContain('Look at this');
+    });
+
+    it('stores [Photo] placeholder for unregistered groups', async () => {
+      const { handler, onMessage } = await getPhotoHandler({});
+
+      await handler({
+        chat: { id: 999, type: 'group', title: 'Test' },
+        from: { id: 42, first_name: 'Alice' },
+        message: {
+          date: Math.floor(Date.now() / 1000),
+          message_id: 55,
+          photo: [{ file_id: 'pic_id', width: 800, height: 600 }],
+        },
+      });
+
+      // Should not attempt download for unregistered group
+      expect(mockFetch).not.toHaveBeenCalled();
+      expect(onMessage).not.toHaveBeenCalled();
+    });
+
+    it('handles fetch exception gracefully', async () => {
+      mockFetch.mockRejectedValueOnce(new Error('network error'));
+      const { handler, onMessage } = await getPhotoHandler();
+
+      await handler({
+        chat: { id: 999, type: 'group', title: 'Test' },
+        from: { id: 42, first_name: 'Alice' },
+        message: {
+          date: Math.floor(Date.now() / 1000),
+          message_id: 56,
+          photo: [{ file_id: 'pic_id', width: 800, height: 600 }],
+        },
+      });
+
+      expect(onMessage).toHaveBeenCalledWith(
+        'tg:999',
+        expect.objectContaining({ content: '[Photo - download failed]' }),
+      );
+    });
+  });
+
+  describe('document download handler', () => {
+    const group: GroupConfig = {
+      jid: 'tg:999',
+      folder: 'test',
+      name: 'Test',
+      trigger: 'yetaclaw',
+      channel: 'telegram',
+      isMain: false,
+      alwaysRespond: false,
+      createdAt: Date.now(),
+    };
+    const groups = { 'tg:999': group };
+
+    async function getDocHandler(g: Record<string, GroupConfig> = groups) {
+      const onMessage = vi.fn();
+      const ch = new TelegramChannel({
+        ...baseOpts,
+        onMessage,
+        onChatMetadata: vi.fn(),
+        registeredGroups: () => g,
+      });
+      await ch.connect();
+      const bot = (ch as unknown as { bot: InstanceType<typeof MockBot> }).bot;
+      const handler = bot.on.mock.calls.find(
+        (c: unknown[]) => c[0] === 'message:document',
+      )?.[1] as (ctx: unknown) => Promise<void>;
+      return { handler, onMessage };
+    }
+
+    function mockSuccessfulDownload() {
+      const fileBytes = new Uint8Array([0x25, 0x50, 0x44, 0x46]);
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              ok: true,
+              result: { file_path: 'documents/file_99.pdf' },
+            }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          arrayBuffer: () => Promise.resolve(fileBytes.buffer),
+        });
+      return fileBytes;
+    }
+
+    it('downloads document, saves to data dir, and stores container path', async () => {
+      const fileBytes = mockSuccessfulDownload();
+      const { handler, onMessage } = await getDocHandler();
+
+      await handler({
+        chat: { id: 999, type: 'group', title: 'Test' },
+        from: { id: 42, first_name: 'Alice' },
+        message: {
+          date: Math.floor(Date.now() / 1000),
+          message_id: 60,
+          document: {
+            file_id: 'doc_file_id',
+            file_name: 'report.pdf',
+            file_size: 5000,
+          },
+        },
+      });
+
+      // Should call getFile API
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+      const getFileUrl = mockFetch.mock.calls[0]?.[0] as string;
+      expect(getFileUrl).toContain('file_id=doc_file_id');
+
+      // Should create directory and write file
+      expect(mockMkdirSync).toHaveBeenCalledWith('/test-data/telegram/files', {
+        recursive: true,
+      });
+      expect(mockWriteFileSync).toHaveBeenCalledOnce();
+      const writePath = mockWriteFileSync.mock.calls[0]?.[0] as string;
+      expect(writePath).toMatch(
+        /^\/test-data\/telegram\/files\/doc_60_\d+_report\.pdf$/,
+      );
+      const writtenBuffer = mockWriteFileSync.mock.calls[0]?.[1] as Buffer;
+      expect([...writtenBuffer]).toEqual([...fileBytes]);
+
+      // Message should reference container path
+      const content = onMessage.mock.calls[0]?.[1]?.content as string;
+      expect(content).toMatch(
+        /^\[Document: \/workspace\/data\/telegram\/files\/doc_60_\d+_report\.pdf\]$/,
+      );
+    });
+
+    it('stores failure placeholder when download fails', async () => {
+      mockFetch.mockResolvedValueOnce({ ok: false, status: 500 });
+      const { handler, onMessage } = await getDocHandler();
+
+      await handler({
+        chat: { id: 999, type: 'group', title: 'Test' },
+        from: { id: 42, first_name: 'Alice' },
+        message: {
+          date: Math.floor(Date.now() / 1000),
+          message_id: 61,
+          document: {
+            file_id: 'doc_id',
+            file_name: 'report.pdf',
+          },
+        },
+      });
+
+      expect(mockWriteFileSync).not.toHaveBeenCalled();
+      expect(onMessage).toHaveBeenCalledWith(
+        'tg:999',
+        expect.objectContaining({
+          content: '[Document: report.pdf - download failed]',
+        }),
+      );
+    });
+
+    it('stores plain placeholder when document has no file_id', async () => {
+      const { handler, onMessage } = await getDocHandler();
+
+      await handler({
+        chat: { id: 999, type: 'group', title: 'Test' },
+        from: { id: 42, first_name: 'Alice' },
+        message: {
+          date: Math.floor(Date.now() / 1000),
+          message_id: 62,
+          document: { file_name: 'readme.txt' },
+        },
+      });
+
+      expect(mockFetch).not.toHaveBeenCalled();
+      expect(onMessage).toHaveBeenCalledWith(
+        'tg:999',
+        expect.objectContaining({ content: '[Document: readme.txt]' }),
+      );
+    });
+
+    it('uses "file" as default name when file_name is missing', async () => {
+      mockSuccessfulDownload();
+      const { handler, onMessage } = await getDocHandler();
+
+      await handler({
+        chat: { id: 999, type: 'group', title: 'Test' },
+        from: { id: 42, first_name: 'Alice' },
+        message: {
+          date: Math.floor(Date.now() / 1000),
+          message_id: 63,
+          document: { file_id: 'doc_id' },
+        },
+      });
+
+      const writePath = mockWriteFileSync.mock.calls[0]?.[0] as string;
+      expect(writePath).toMatch(/\/doc_63_\d+_file$/);
+
+      const content = onMessage.mock.calls[0]?.[1]?.content as string;
+      expect(content).toMatch(
+        /\[Document: \/workspace\/data\/telegram\/files\/doc_63_\d+_file\]$/,
+      );
+    });
+
+    it('does not download for unregistered groups', async () => {
+      const { handler, onMessage } = await getDocHandler({});
+
+      await handler({
+        chat: { id: 999, type: 'group', title: 'Test' },
+        from: { id: 42, first_name: 'Alice' },
+        message: {
+          date: Math.floor(Date.now() / 1000),
+          message_id: 64,
+          document: { file_id: 'doc_id', file_name: 'secret.pdf' },
+        },
+      });
+
+      expect(mockFetch).not.toHaveBeenCalled();
+      expect(onMessage).not.toHaveBeenCalled();
+    });
+
+    it('handles fetch exception gracefully', async () => {
+      mockFetch.mockRejectedValueOnce(new Error('timeout'));
+      const { handler, onMessage } = await getDocHandler();
+
+      await handler({
+        chat: { id: 999, type: 'group', title: 'Test' },
+        from: { id: 42, first_name: 'Alice' },
+        message: {
+          date: Math.floor(Date.now() / 1000),
+          message_id: 65,
+          document: { file_id: 'doc_id', file_name: 'data.csv' },
+        },
+      });
+
+      expect(onMessage).toHaveBeenCalledWith(
+        'tg:999',
+        expect.objectContaining({
+          content: '[Document: data.csv - download failed]',
+        }),
+      );
+    });
+
+    it('includes caption with downloaded document', async () => {
+      mockSuccessfulDownload();
+      const { handler, onMessage } = await getDocHandler();
+
+      await handler({
+        chat: { id: 999, type: 'group', title: 'Test' },
+        from: { id: 42, first_name: 'Alice' },
+        message: {
+          date: Math.floor(Date.now() / 1000),
+          message_id: 66,
+          caption: 'Here is the report',
+          document: { file_id: 'doc_id', file_name: 'report.pdf' },
+        },
+      });
+
+      const content = onMessage.mock.calls[0]?.[1]?.content as string;
+      expect(content).toMatch(
+        /^\[Document: \/workspace\/data\/telegram\/files\//,
+      );
+      expect(content).toContain('Here is the report');
     });
   });
 

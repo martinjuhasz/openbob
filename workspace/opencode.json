@@ -1,0 +1,8 @@
+{
+  "share": "disabled",
+  "permission": {
+    "edit": "allow",
+    "bash": "allow"
+  },
+  "mcp": {}
+}

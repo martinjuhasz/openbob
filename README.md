@@ -247,15 +247,47 @@ All containers share the `yetaclaw` Docker network. The host reaches agent conta
 
 Groups can use different models. Set the `model` field when registering a group (via MCP tool or database), and it overrides the global `MODEL` env var for that group.
 
-## MCP Tools (Available to Agents)
+## MCP Servers
+
+Agents get MCP tools from two sources:
+
+### Built-in: `yetaclaw` Server
+
+Always present — hardcoded in `agent/src/index.ts` via `createOpencodeServer()`. Provides IPC tools for messaging, task scheduling, and group management. This server runs as a stdio child process inside each agent container.
 
 | Tool                                         | Description                                   | Restriction                  |
 | -------------------------------------------- | --------------------------------------------- | ---------------------------- |
 | `send_message`                               | Send a message to the chat immediately        | Own group only (unless main) |
 | `schedule_task`                              | Create cron/interval/one-shot scheduled tasks | Own group only (unless main) |
 | `cancel_task` / `pause_task` / `resume_task` | Manage scheduled tasks                        | Own group only (unless main) |
+| `list_tasks`                                 | List scheduled tasks (main sees all)          | —                            |
+| `update_task`                                | Update an existing task's config              | Own group only (unless main) |
 | `register_group`                             | Register a new channel/group                  | Main group only              |
 | `update_group`                               | Update group config (trigger, model, etc.)    | Main group only              |
+
+### Custom MCP Servers
+
+Add MCP servers for all agents by editing `workspace/opencode.json` — the base config template:
+
+```json
+{
+  "share": "disabled",
+  "permission": {
+    "edit": "allow",
+    "bash": "allow"
+  },
+  "mcp": {
+    "my-server": {
+      "type": "local",
+      "command": ["node", "/workspace/skills/my-server/index.js"]
+    }
+  }
+}
+```
+
+The host reads this template, overlays the per-group `model`, and writes the result to each group's `opencode.json`. Any MCP servers defined here are available to every agent.
+
+For per-group MCP servers, the agent can create its own `/workspace/project/opencode.json` override (see [Two-Tier Configuration](#two-tier-configuration)).
 
 ## Skills
 
@@ -310,7 +342,8 @@ yetaclaw/
 │       ├── index.ts        # OpenCode server startup
 │       └── mcp-server.ts   # MCP tools for the agent
 ├── workspace/
-│   └── AGENTS.md           # Agent instructions (mounted into containers)
+│   ├── AGENTS.md           # Agent instructions (mounted into containers)
+│   └── opencode.json       # Base config template (model, permissions, MCP servers)
 ├── skills/                 # Skill packs (read-only in containers)
 ├── openviking/             # OpenViking config + Dockerfile
 ├── docker-compose.yml

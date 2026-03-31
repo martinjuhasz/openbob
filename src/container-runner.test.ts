@@ -255,7 +255,7 @@ describe('container-runner', () => {
   // ── writeOpencodeConfig (tested via spawnContainer → warmUp) ────────────
 
   describe('writeOpencodeConfig', () => {
-    it('writes opencode.json with model and defaults', async () => {
+    it('reads workspace template and overlays model', async () => {
       mockExecFile.mockImplementation((_cmd: string, args: string[]) => {
         if (args[0] === 'inspect' && args.length > 2)
           return dockerOk('/workspace:/host/workspace;');
@@ -272,8 +272,14 @@ describe('container-runner', () => {
       process.env['ANTHROPIC_API_KEY'] = 'sk-test';
       mockClientAuth.set.mockResolvedValue({ data: {} });
 
-      // No existing opencode.json → readFileSync throws
-      mockFs.readFileSync.mockImplementation(() => {
+      // Template at /workspace/opencode.json with shared settings
+      const template = {
+        share: 'disabled',
+        permission: { edit: 'allow', bash: 'allow' },
+        mcp: { 'my-tool': { type: 'local', command: ['node', 'tool.js'] } },
+      };
+      mockFs.readFileSync.mockImplementation((p: string) => {
+        if (p === '/workspace/opencode.json') return JSON.stringify(template);
         const err: NodeJS.ErrnoException = new Error('ENOENT');
         err.code = 'ENOENT';
         throw err;
@@ -292,15 +298,19 @@ describe('container-runner', () => {
       expect(writeCalls.length).toBeGreaterThanOrEqual(1);
 
       const written = JSON.parse(writeCalls[0][1] as string);
+      // Model overlaid from argument
       expect(written.model).toBe('anthropic/claude-sonnet-4-6');
-      expect(written.provider).toBeUndefined();
+      // Template fields preserved
       expect(written.share).toBe('disabled');
       expect(written.permission).toEqual({ edit: 'allow', bash: 'allow' });
+      expect(written.mcp).toEqual({
+        'my-tool': { type: 'local', command: ['node', 'tool.js'] },
+      });
 
       vi.unstubAllGlobals();
     });
 
-    it('writes fresh base config (no merge with existing)', async () => {
+    it('falls back to model-only config when template not found', async () => {
       mockExecFile.mockImplementation((_cmd: string, args: string[]) => {
         if (args[0] === 'inspect' && args.length > 2)
           return dockerOk('/workspace:/host/workspace;');
@@ -317,17 +327,57 @@ describe('container-runner', () => {
       process.env['ANTHROPIC_API_KEY'] = 'sk-test';
       mockClientAuth.set.mockResolvedValue({ data: {} });
 
-      // Existing opencode.json with custom settings — should be OVERWRITTEN (not merged)
-      const existingConfig = {
-        provider: { default: 'old-model/old' },
-        model: 'old-model/old',
-        share: 'enabled',
-        permission: { edit: 'deny', bash: 'deny' },
-        mcp: { custom_tool: { type: 'local', command: 'node tool.js' } },
+      // No template file → readFileSync always throws
+      mockFs.readFileSync.mockImplementation(() => {
+        const err: NodeJS.ErrnoException = new Error('ENOENT');
+        err.code = 'ENOENT';
+        throw err;
+      });
+
+      const { warmUpContainers } = await importRunner();
+      await warmUpContainers([
+        { folder: 'fallback-group', model: 'anthropic/claude-sonnet-4-6' },
+      ]);
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const writeCalls = (mockFs.writeFileSync.mock.calls as any[]).filter(
+        (c) => typeof c[0] === 'string' && c[0].endsWith('opencode.json'),
+      );
+      expect(writeCalls.length).toBeGreaterThanOrEqual(1);
+
+      const written = JSON.parse(writeCalls[0][1] as string);
+      // Only model — no template fields
+      expect(written.model).toBe('anthropic/claude-sonnet-4-6');
+      expect(written.share).toBeUndefined();
+      expect(written.permission).toBeUndefined();
+
+      vi.unstubAllGlobals();
+    });
+
+    it('writes fresh config each time (ignores existing per-group config)', async () => {
+      mockExecFile.mockImplementation((_cmd: string, args: string[]) => {
+        if (args[0] === 'inspect' && args.length > 2)
+          return dockerOk('/workspace:/host/workspace;');
+        if (args[0] === 'ps') return dockerOk('\n');
+        if (args[0] === 'rm') return dockerOk();
+        if (args[0] === 'run') return dockerOk('id');
+        return dockerOk();
+      });
+
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) }),
+      );
+      process.env['ANTHROPIC_API_KEY'] = 'sk-test';
+      mockClientAuth.set.mockResolvedValue({ data: {} });
+
+      // Template with base settings
+      const template = {
+        share: 'disabled',
+        permission: { edit: 'allow', bash: 'allow' },
       };
       mockFs.readFileSync.mockImplementation((p: string) => {
-        if (typeof p === 'string' && p.endsWith('opencode.json'))
-          return JSON.stringify(existingConfig);
+        if (p === '/workspace/opencode.json') return JSON.stringify(template);
         const err: NodeJS.ErrnoException = new Error('ENOENT');
         err.code = 'ENOENT';
         throw err;
@@ -345,13 +395,12 @@ describe('container-runner', () => {
       expect(writeCalls.length).toBeGreaterThanOrEqual(1);
 
       const written = JSON.parse(writeCalls[0][1] as string);
-      // Model updated — fresh write, not merged
+      // Model from argument, not from any existing per-group config
       expect(written.model).toBe('openrouter/anthropic/claude-opus-4');
-      // Base config always writes defaults (no merge with existing)
+      // Template defaults applied
       expect(written.share).toBe('disabled');
       expect(written.permission).toEqual({ edit: 'allow', bash: 'allow' });
-      // Custom fields from old config are NOT preserved (fresh write)
-      expect(written.mcp).toBeUndefined();
+      // No stale fields from previous per-group config
       expect(written.provider).toBeUndefined();
 
       vi.unstubAllGlobals();

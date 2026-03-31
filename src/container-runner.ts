@@ -205,22 +205,37 @@ function getForwardEnvArgs(): string[] {
 }
 
 /**
- * Write the base opencode.json for a group.
- * This file is mounted read-only at /workspace/opencode.json inside the agent container.
+ * Write the base opencode.json for a group from the workspace template.
+ *
+ * Reads /workspace/opencode.json as the base template (share, permission, mcp, etc.),
+ * overlays the group's model, and writes the result to the group directory.
+ * Mounted read-only at /workspace/opencode.json inside the agent container.
  * OpenCode's findUp from CWD (/workspace/project) discovers this as the parent config.
  * Agents can create their own /workspace/project/opencode.json to override settings.
  *
- * The base config is written fresh each time (no merging) — it is host-controlled.
+ * The base config is written fresh each time (no merging with existing per-group config).
  */
+const BASE_CONFIG_TEMPLATE = '/workspace/opencode.json';
+
 function writeOpencodeConfig(groupFolder: string, model: string): void {
   const groupDir = path.join(GROUPS_DIR, groupFolder);
   const configPath = path.join(groupDir, 'opencode.json');
 
-  const config: Record<string, unknown> = {
-    model,
-    share: 'disabled',
-    permission: { edit: 'allow', bash: 'allow' },
-  };
+  // Read the workspace template, fall back to empty object if not found
+  let template: Record<string, unknown> = {};
+  try {
+    const raw = fs.readFileSync(BASE_CONFIG_TEMPLATE, 'utf-8');
+    template = JSON.parse(raw) as Record<string, unknown>;
+  } catch (err) {
+    if (err instanceof Error && 'code' in err && err.code === 'ENOENT') {
+      logger.warn('Base opencode.json template not found, using defaults');
+    } else {
+      throw err;
+    }
+  }
+
+  // Model is always set dynamically per group
+  const config = { ...template, model };
 
   fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
   logger.debug({ groupFolder, model, configPath }, 'Wrote base opencode.json');
