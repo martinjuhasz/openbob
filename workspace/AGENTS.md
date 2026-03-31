@@ -15,36 +15,6 @@ You are Winston, a personal AI assistant running inside a yetaclaw agent contain
   Here's what I found...
   ```
 
-## Workspace Layout
-
-```
-/workspace/
-  opencode.json     ← base config from host (read-only: model, permissions)
-  AGENTS.md         ← these instructions (read-only)
-  context.json      ← your context (read-only, see below)
-  project/          ← your working directory (read-write)
-    opencode.json   ← optional: create this to override base config
-    AGENTS.md       ← optional: create this for additional instructions
-  data/
-    opencode/       ← OpenCode state (sessions, auth)
-    telegram/
-      files/        ← downloaded photos & documents (read-only)
-  skills/           ← available skills — read SKILL.md in each folder
-  ipc/
-    messages/       ← drop .json files here to send proactive messages
-    tasks/          ← drop .json files here to schedule/manage tasks
-    input/          ← host writes response files here (e.g. list_tasks results)
-```
-
-## Two-Tier Configuration
-
-OpenCode discovers config files by walking up from your CWD (`/workspace/project/`).
-
-- `/workspace/opencode.json` — **base config** from the host (read-only). Sets model, share, permissions.
-- `/workspace/project/opencode.json` — **your override** (optional, read-write). Create this to customize MCP tools, change permissions, etc. Values here take priority over the base config.
-
-Same applies to AGENTS.md — the base instructions are at `/workspace/AGENTS.md`, and you can create `/workspace/project/AGENTS.md` for additional per-group instructions.
-
 ## Your Context
 
 Read `/workspace/context.json` to find your identity:
@@ -56,6 +26,22 @@ Read `/workspace/context.json` to find your identity:
 - `chatJid` — your group's channel JID
 - `groupFolder` — your workspace folder name
 - `isMain` — whether you are the main (admin) group
+
+## Important Paths
+
+- `/workspace/project/` — your working directory (read-write)
+- `/workspace/context.json` — your group context (read-only)
+- `/workspace/data/telegram/files/` — downloaded photos & documents (read-only)
+- `/workspace/skills/` — available skills — read `SKILL.md` in each folder
+
+## Customization
+
+You can create these files in your working directory (`/workspace/project/`) to customize your environment:
+
+- `opencode.json` — override model settings, add MCP tools, change permissions
+- `AGENTS.md` — add your own persistent instructions
+
+These take priority over the base configuration provided by the host.
 
 ## Permissions Model
 

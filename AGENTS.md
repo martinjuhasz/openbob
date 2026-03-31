@@ -47,16 +47,16 @@ src/                     # Host — orchestrator
   db.ts                  # SQLite persistence
   env.ts                 # zod env validation
   types.ts               # shared type definitions
-  channels/              # channel adapters (mattermost.ts, registry.ts)
+  channels/              # channel adapters (telegram.ts, mattermost.ts, registry.ts)
 
 agent/                   # Agent — runs inside Docker containers
   src/index.ts           # OpenCode server on port 4096
   src/mcp-server.ts      # 9 MCP tools (send_message, schedule_task, etc.)
 
-workspace/global/        # shared read-only files mounted into containers
-  AGENTS.md              # agent instructions (for the AI inside containers, NOT this file)
+workspace/
+  AGENTS.md              # agent instructions (mounted read-only into containers)
 
-skills/                  # read-only skill packs mounted at /skills/ in containers
+skills/                  # read-only skill packs mounted at /workspace/skills/ in containers
 ```
 
 Host and agent are separate npm packages with separate `tsconfig.json`. ESLint only covers `src/` (host). Agent has no tests or linting.
@@ -72,3 +72,5 @@ Agents write JSON files to `/workspace/ipc/tasks/` or `/workspace/ipc/messages/`
 - Per-group model override via `model` column on `registered_groups` table (nullable)
 - Channel adapters self-register in `channels/registry.ts`
 - Agent container names: `yetaclaw-agent-<groupFolder>`
+- Two-tier config: host writes base `opencode.json` (read-only), agent can override in `project/opencode.json`
+- `context.json` at `/workspace/context.json` — updated by host via `fs.writeFileSync` (same inode, visible through Docker file bind mount)

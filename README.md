@@ -162,16 +162,49 @@ Runs inside each Docker container:
 | `index.ts`      | Starts OpenCode server on port 4096                                |
 | `mcp-server.ts` | MCP tools: `send_message`, `schedule_task`, `register_group`, etc. |
 
+### Container Workspace Layout
+
+Each agent container has everything mounted under `/workspace`:
+
+```
+/workspace/
+  opencode.json         ← base config from host (read-only: model, permissions)
+  AGENTS.md             ← agent instructions (read-only)
+  context.json          ← group context: chatJid, groupFolder, isMain (read-only)
+  project/              ← agent working directory (CWD, read-write)
+  │  ├── opencode.json  ← optional: agent-created overrides for base config
+  │  └── AGENTS.md      ← optional: agent-created supplemental instructions
+  data/
+  │  ├── opencode/      ← OpenCode state (sessions, auth)
+  │  └── telegram/
+  │       └── files/    ← downloaded photos & documents (read-only)
+  skills/               ← skill packs (read-only)
+  ipc/
+     ├── messages/      ← agent → host: send messages
+     ├── tasks/         ← agent → host: schedule/manage tasks
+     └── input/         ← host → agent: response files
+```
+
+### Two-Tier Configuration
+
+OpenCode discovers config files by walking up from the agent's CWD (`/workspace/project/`) to `/`. With the layout above, it finds two levels:
+
+1. **Base config** (`/workspace/opencode.json`) — written fresh by the host before each session. Sets model, share mode, and default permissions. Read-only inside the container.
+2. **Agent override** (`/workspace/project/opencode.json`) — optional, created by the agent itself. Higher priority — agents can add MCP tools, change permissions, or customize behavior without touching the base config.
+
+Same mechanism applies to `AGENTS.md` — both levels are concatenated, so the agent can supplement its base instructions.
+
 ### Container Lifecycle
 
 1. Host receives a message for a group
 2. `getAgentContainer()` checks if a container exists or spawns a new one
-3. `writeOpencodeConfig()` writes/merges `opencode.json` with model config into the group workspace
-4. Container starts, OpenCode server boots on port 4096
-5. Host sends prompt via `client.session.promptAsync()`, polls for completion
-6. Agent processes the prompt, can call MCP tools (send messages, schedule tasks) via filesystem IPC
-7. Host collects the response and posts it to the channel
-8. Container stays warm for subsequent messages
+3. `writeOpencodeConfig()` writes a fresh `opencode.json` with the group's model config (no merging with existing)
+4. `context.json` is updated with the group's identity (`chatJid`, `groupFolder`, `isMain`)
+5. Container starts, OpenCode server boots on port 4096
+6. Host sends prompt via `client.session.promptAsync()`, polls for completion
+7. Agent processes the prompt, can call MCP tools (send messages, schedule tasks) via filesystem IPC
+8. Host collects the response and posts it to the channel
+9. Container stays warm for subsequent messages
 
 ### Docker Network
 
@@ -210,27 +243,6 @@ All containers share the `yetaclaw` Docker network. The host reaches agent conta
 | `AGENT_FORWARD_ENV`     | No        | Comma-separated env vars to forward to agent containers         |
 | `OPENVIKING_URL`        | No        | OpenViking API URL (default: `http://openviking:1933`)          |
 
-### Per-Group Config (`opencode.json`)
-
-Each group's workspace contains an `opencode.json` that OpenCode reads on startup. The host writes the model config automatically, but agents can edit it to add MCP tools, change permissions, or customize behavior:
-
-```json
-{
-  "model": "anthropic/claude-sonnet-4-6",
-  "share": "disabled",
-  "permission": {
-    "edit": "allow",
-    "bash": "allow"
-  },
-  "mcp": {
-    "custom-tool": {
-      "type": "local",
-      "command": ["node", "my-tool.js"]
-    }
-  }
-}
-```
-
 ### Per-Group Model Override
 
 Groups can use different models. Set the `model` field when registering a group (via MCP tool or database), and it overrides the global `MODEL` env var for that group.
@@ -247,7 +259,7 @@ Groups can use different models. Set the `model` field when registering a group 
 
 ## Skills
 
-Skills are read-only instruction packs mounted at `/skills` inside agent containers. Each skill has a `SKILL.md` file that teaches the agent a capability.
+Skills are read-only instruction packs mounted at `/workspace/skills` inside agent containers. Each skill has a `SKILL.md` file that teaches the agent a capability.
 
 Built-in skills:
 
@@ -298,8 +310,7 @@ yetaclaw/
 │       ├── index.ts        # OpenCode server startup
 │       └── mcp-server.ts   # MCP tools for the agent
 ├── workspace/
-│   ├── groups/             # Per-group workspaces
-│   └── global/             # Shared files (AGENTS.md)
+│   └── AGENTS.md           # Agent instructions (mounted into containers)
 ├── skills/                 # Skill packs (read-only in containers)
 ├── openviking/             # OpenViking config + Dockerfile
 ├── docker-compose.yml
