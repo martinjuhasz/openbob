@@ -8,7 +8,7 @@ import path from 'path';
 import { Bot, InputFile } from 'grammy';
 import type { Api } from 'grammy';
 
-import { ASSISTANT_NAME, GROUPS_DIR } from '../config.js';
+import { ASSISTANT_NAME, DATA_DIR } from '../config.js';
 import { logger } from '../logger.js';
 import {
   Channel,
@@ -263,7 +263,7 @@ export class TelegramChannel implements Channel {
       });
     };
 
-    // --- Photos: download to group workspace so agent can view them ---
+    // --- Photos: download to shared data dir so agent can view them ---
     this.bot.on('message:photo', async (ctx) => {
       const chatJid = `${JID_PREFIX}${ctx.chat.id}`;
       const group = this.registeredGroups()[chatJid];
@@ -282,15 +282,13 @@ export class TelegramChannel implements Channel {
         // Use the highest resolution variant (last element)
         const photo = photos[photos.length - 1];
 
-        // Save to group's images/ directory
-        const groupDir = path.join(GROUPS_DIR, group.folder);
-        const imagesDir = path.join(groupDir, 'images');
-        fs.mkdirSync(imagesDir, { recursive: true });
+        // Save to data/telegram/files/ (visible at /workspace/data/telegram/files/ in agent)
+        const filesDir = path.join(DATA_DIR, 'telegram', 'files');
+        fs.mkdirSync(filesDir, { recursive: true });
 
         const filename = `photo_${ctx.message.message_id}_${Date.now()}.jpg`;
-        const hostPath = path.join(imagesDir, filename);
-        // Container-visible path (group folder mounted at /workspace/group)
-        const containerPath = `/workspace/group/images/${filename}`;
+        const hostPath = path.join(filesDir, filename);
+        const containerPath = `/workspace/data/telegram/files/${filename}`;
 
         const result = await downloadTelegramFile(this.botToken, photo.file_id);
         if (result) {
@@ -316,9 +314,49 @@ export class TelegramChannel implements Channel {
     this.bot.on('message:video', (ctx) => storeNonText(ctx, '[Video]'));
     this.bot.on('message:voice', (ctx) => storeNonText(ctx, '[Voice message]'));
     this.bot.on('message:audio', (ctx) => storeNonText(ctx, '[Audio]'));
-    this.bot.on('message:document', (ctx) => {
-      const name = ctx.message.document?.file_name || 'file';
-      storeNonText(ctx, `[Document: ${name}]`);
+    this.bot.on('message:document', async (ctx) => {
+      const chatJid = `${JID_PREFIX}${ctx.chat.id}`;
+      const group = this.registeredGroups()[chatJid];
+      const docName = ctx.message.document?.file_name || 'file';
+
+      if (!group) {
+        storeNonText(ctx, `[Document: ${docName}]`);
+        return;
+      }
+
+      try {
+        const fileId = ctx.message.document?.file_id;
+        if (!fileId) {
+          storeNonText(ctx, `[Document: ${docName}]`);
+          return;
+        }
+
+        const filesDir = path.join(DATA_DIR, 'telegram', 'files');
+        fs.mkdirSync(filesDir, { recursive: true });
+
+        const filename = `doc_${ctx.message.message_id}_${Date.now()}_${docName}`;
+        const hostPath = path.join(filesDir, filename);
+        const containerPath = `/workspace/data/telegram/files/${filename}`;
+
+        const result = await downloadTelegramFile(this.botToken, fileId);
+        if (result) {
+          fs.writeFileSync(hostPath, result.buffer);
+          logger.info(
+            { chatJid, filename, size: ctx.message.document?.file_size },
+            'Telegram document downloaded',
+          );
+          storeNonText(ctx, `[Document: ${containerPath}]`);
+        } else {
+          storeNonText(ctx, `[Document: ${docName} - download failed]`);
+        }
+        // eslint-disable-next-line no-catch-all/no-catch-all -- graceful degradation for document download
+      } catch (err) {
+        logger.warn(
+          { err },
+          'Failed to download Telegram document, using placeholder',
+        );
+        storeNonText(ctx, `[Document: ${docName} - download failed]`);
+      }
     });
     this.bot.on('message:sticker', (ctx) => {
       const emoji = ctx.message.sticker?.emoji || '';

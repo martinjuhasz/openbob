@@ -42,22 +42,20 @@ COPY tsconfig.json ./
 # Build TypeScript
 RUN npm run build
 
-# Skills are mounted at /skills at runtime (read-only)
-# Workspace is mounted at /workspace at runtime (read-write per group)
+# All runtime directories live under /workspace (mounted at runtime)
 RUN mkdir -p \
-    /workspace/group \
-    /workspace/global \
+    /workspace/project \
+    /workspace/data/opencode \
+    /workspace/skills \
     /workspace/ipc/messages \
     /workspace/ipc/tasks \
     /workspace/ipc/input \
-    /skills \
     /home/node/.local/share
 
 RUN chown -R node:node /workspace /home/node && chmod 777 /home/node
 USER node
 
-WORKDIR /workspace/group
+WORKDIR /workspace/project
 
-# Symlink ~/.local/share/opencode → /data/opencode so OpenCode finds its auth + config
-# /data is mounted at runtime from the shared yetaclaw-data volume
-ENTRYPOINT ["sh", "-c", "mkdir -p /data/opencode && ln -sfn /data/opencode /home/node/.local/share/opencode && exec node /app/dist/index.js"]
+# Symlink ~/.local/share/opencode → /workspace/data/opencode so OpenCode finds its auth + config
+ENTRYPOINT ["sh", "-c", "ln -sfn /workspace/data/opencode /home/node/.local/share/opencode && exec node /app/dist/index.js"]

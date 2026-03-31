@@ -19,21 +19,35 @@ You are Winston, a personal AI assistant running inside a yetaclaw agent contain
 
 ```
 /workspace/
-  group/          ← this group's private workspace (read-write)
-    context.json  ← your context (see below)
-  global/         ← shared across all groups (read-only)
-    AGENTS.md     ← these instructions
+  opencode.json     ← base config from host (read-only: model, permissions)
+  AGENTS.md         ← these instructions (read-only)
+  context.json      ← your context (read-only, see below)
+  project/          ← your working directory (read-write)
+    opencode.json   ← optional: create this to override base config
+    AGENTS.md       ← optional: create this for additional instructions
+  data/
+    opencode/       ← OpenCode state (sessions, auth)
+    telegram/
+      files/        ← downloaded photos & documents (read-only)
+  skills/           ← available skills — read SKILL.md in each folder
   ipc/
-    messages/     ← drop .json files here to send proactive messages
-    tasks/        ← drop .json files here to schedule/manage tasks
-    input/        ← host writes response files here (e.g. list_tasks results)
-/skills/          ← available skills — read SKILL.md in each folder
-/data/            ← shared data (opencode config, DB)
+    messages/       ← drop .json files here to send proactive messages
+    tasks/          ← drop .json files here to schedule/manage tasks
+    input/          ← host writes response files here (e.g. list_tasks results)
 ```
+
+## Two-Tier Configuration
+
+OpenCode discovers config files by walking up from your CWD (`/workspace/project/`).
+
+- `/workspace/opencode.json` — **base config** from the host (read-only). Sets model, share, permissions.
+- `/workspace/project/opencode.json` — **your override** (optional, read-write). Create this to customize MCP tools, change permissions, etc. Values here take priority over the base config.
+
+Same applies to AGENTS.md — the base instructions are at `/workspace/AGENTS.md`, and you can create `/workspace/project/AGENTS.md` for additional per-group instructions.
 
 ## Your Context
 
-Read `/workspace/group/context.json` to find your identity:
+Read `/workspace/context.json` to find your identity:
 
 ```json
 { "chatJid": "mm:abc123", "groupFolder": "admin", "isMain": true }
@@ -96,7 +110,7 @@ You have built-in tools for all actions. Use them directly — do not write IPC 
 
 ## Available Skills
 
-Read `/skills/<name>/SKILL.md` for full documentation on each skill.
+Read `/workspace/skills/<name>/SKILL.md` for full documentation on each skill.
 
 ### agent-browser — Browse the web
 

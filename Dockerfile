@@ -25,7 +25,7 @@ COPY --from=builder /app/node_modules ./node_modules/
 COPY package.json ./
 
 # Data and workspace directories
-RUN mkdir -p /data /workspace/global /workspace/groups
+RUN mkdir -p /data /workspace/groups
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
   CMD node -e "require('fs').existsSync('/data') || process.exit(1)"

@@ -1,7 +1,7 @@
 /**
  * Stdio MCP Server for yetaclaw
  * Runs as child process inside agent container, provides IPC tools.
- * Context is read from /workspace/group/context.json (written by host on first message).
+ * Context is read from /workspace/context.json (written by host, mounted ro).
  */
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -14,7 +14,7 @@ import { CronExpressionParser } from 'cron-parser';
 const IPC_DIR = '/workspace/ipc';
 const MESSAGES_DIR = path.join(IPC_DIR, 'messages');
 const TASKS_DIR = path.join(IPC_DIR, 'tasks');
-const CONTEXT_FILE = '/workspace/group/context.json';
+const CONTEXT_FILE = '/workspace/context.json';
 
 interface GroupContext {
   chatJid: string;

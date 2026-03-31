@@ -300,7 +300,7 @@ describe('container-runner', () => {
       vi.unstubAllGlobals();
     });
 
-    it('preserves existing opencode.json fields while updating model', async () => {
+    it('writes fresh base config (no merge with existing)', async () => {
       mockExecFile.mockImplementation((_cmd: string, args: string[]) => {
         if (args[0] === 'inspect' && args.length > 2)
           return dockerOk('/workspace:/host/workspace;');
@@ -317,8 +317,7 @@ describe('container-runner', () => {
       process.env['ANTHROPIC_API_KEY'] = 'sk-test';
       mockClientAuth.set.mockResolvedValue({ data: {} });
 
-      // Existing opencode.json with custom MCP tools and permissions
-      // Simulates a stale config with old provider.default format
+      // Existing opencode.json with custom settings — should be OVERWRITTEN (not merged)
       const existingConfig = {
         provider: { default: 'old-model/old' },
         model: 'old-model/old',
@@ -346,15 +345,14 @@ describe('container-runner', () => {
       expect(writeCalls.length).toBeGreaterThanOrEqual(1);
 
       const written = JSON.parse(writeCalls[0][1] as string);
-      // Model updated via top-level key
+      // Model updated — fresh write, not merged
       expect(written.model).toBe('openrouter/anthropic/claude-opus-4');
-      // Stale provider.default cleaned up
+      // Base config always writes defaults (no merge with existing)
+      expect(written.share).toBe('disabled');
+      expect(written.permission).toEqual({ edit: 'allow', bash: 'allow' });
+      // Custom fields from old config are NOT preserved (fresh write)
+      expect(written.mcp).toBeUndefined();
       expect(written.provider).toBeUndefined();
-      // Existing fields preserved (not overwritten with defaults)
-      expect(written.share).toBe('enabled');
-      expect(written.permission).toEqual({ edit: 'deny', bash: 'deny' });
-      // Custom MCP tools preserved
-      expect(written.mcp.custom_tool.command).toBe('node tool.js');
 
       vi.unstubAllGlobals();
     });
@@ -565,10 +563,14 @@ describe('container-runner', () => {
       const { runAgentSession } = await importRunner();
       await runAgentSession({ ...baseInput, isMain: true });
 
+      // Find the LAST context.json write (spawnContainer pre-creates it,
+      // then runAgentSession updates it with real values)
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const contextCall = (mockFs.writeFileSync.mock.calls as any[]).find(
+      const contextCalls = (mockFs.writeFileSync.mock.calls as any[]).filter(
         (c) => typeof c[0] === 'string' && c[0].endsWith('context.json'),
       );
+      expect(contextCalls.length).toBeGreaterThanOrEqual(1);
+      const contextCall = contextCalls[contextCalls.length - 1];
       expect(contextCall).toBeDefined();
       const ctx = JSON.parse(contextCall![1] as string);
       expect(ctx.chatJid).toBe('mm:channel-abc');

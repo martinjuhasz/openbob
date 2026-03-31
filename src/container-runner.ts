@@ -205,61 +205,25 @@ function getForwardEnvArgs(): string[] {
 }
 
 /**
- * Write / merge opencode.json into the group's workspace directory.
- * OpenCode reads this file automatically from the container's CWD (/workspace/group).
+ * Write the base opencode.json for a group.
+ * This file is mounted read-only at /workspace/opencode.json inside the agent container.
+ * OpenCode's findUp from CWD (/workspace/project) discovers this as the parent config.
+ * Agents can create their own /workspace/project/opencode.json to override settings.
  *
- * - Sets top-level `model` to the given model string (format: providerID/modelID)
- * - Only writes defaults for `share` and `permission` if not already present
- * - Preserves all other fields (agents can add MCP tools, change permissions, etc.)
+ * The base config is written fresh each time (no merging) — it is host-controlled.
  */
 function writeOpencodeConfig(groupFolder: string, model: string): void {
   const groupDir = path.join(GROUPS_DIR, groupFolder);
   const configPath = path.join(groupDir, 'opencode.json');
 
-  // Read existing config if present
-  let config: Record<string, unknown> = {};
-  try {
-    const existing = fs.readFileSync(configPath, 'utf-8');
-    config = JSON.parse(existing) as Record<string, unknown>;
-  } catch (err) {
-    if (
-      err instanceof SyntaxError ||
-      (err instanceof Error &&
-        'code' in err &&
-        (err as NodeJS.ErrnoException).code === 'ENOENT')
-    ) {
-      // No existing file or invalid JSON — start fresh
-    } else {
-      throw err;
-    }
-  }
-
-  // Set default model — top-level "model" key, format: "providerID/modelID"
-  config.model = model;
-
-  // Remove stale provider.default if left over from a previous version
-  const provider = config.provider as Record<string, unknown> | undefined;
-  if (
-    provider &&
-    'default' in provider &&
-    typeof provider.default === 'string'
-  ) {
-    delete provider.default;
-    if (Object.keys(provider).length === 0) {
-      delete config.provider;
-    }
-  }
-
-  // Set defaults only if not already present
-  if (config.share === undefined) {
-    config.share = 'disabled';
-  }
-  if (config.permission === undefined) {
-    config.permission = { edit: 'allow', bash: 'allow' };
-  }
+  const config: Record<string, unknown> = {
+    model,
+    share: 'disabled',
+    permission: { edit: 'allow', bash: 'allow' },
+  };
 
   fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
-  logger.debug({ groupFolder, model, configPath }, 'Wrote opencode.json');
+  logger.debug({ groupFolder, model, configPath }, 'Wrote base opencode.json');
 }
 
 /**
@@ -279,8 +243,23 @@ async function spawnContainer(
   fs.mkdirSync(groupDir, { recursive: true });
   fs.chmodSync(groupDir, 0o777);
 
-  // Write opencode.json with model config before starting the container
+  // Create project subdirectory for agent's CWD (rw)
+  const projectDir = path.join(groupDir, 'project');
+  fs.mkdirSync(projectDir, { recursive: true });
+  fs.chmodSync(projectDir, 0o777);
+
+  // Write base opencode.json (mounted ro at /workspace/opencode.json)
   writeOpencodeConfig(groupFolder, model);
+
+  // Pre-create context.json so the file bind mount works at container start
+  // It will be updated with real values in runAgentSession before each prompt
+  const contextFile = path.join(groupDir, 'context.json');
+  if (!fs.existsSync(contextFile)) {
+    fs.writeFileSync(
+      contextFile,
+      JSON.stringify({ chatJid: '', groupFolder, isMain: false }, null, 2),
+    );
+  }
 
   const ipcDir = path.join(DATA_DIR, 'ipc', groupFolder);
   const ipcTasksDir = path.join(ipcDir, 'tasks');
@@ -291,25 +270,35 @@ async function spawnContainer(
   fs.chmodSync(ipcTasksDir, 0o777);
   fs.chmodSync(ipcInputDir, 0o777);
 
-  // Pre-create /data/opencode so the node user can access it in the agent container
+  // Pre-create opencode data dir so the node user can access it in the agent container
   const opencodeDir = path.join(DATA_DIR, 'opencode');
   fs.mkdirSync(opencodeDir, { recursive: true });
   fs.chmodSync(opencodeDir, 0o777);
 
-  // Compute host-side paths for workspace and skills mounts
-  // WORKSPACE_PATH_HOST = actual host path for /workspace inside this container
-  // Layout: /workspace/groups/<folder>  and  /workspace/global  (NOT /workspace/groups/global)
+  // Compute host-side paths for agent container mounts
+  // WORKSPACE_PATH_HOST = actual host path for /workspace inside this (host) container
+  // New agent layout: everything under /workspace in the agent container
   const groupDirHost = WORKSPACE_PATH_HOST
     ? path.join(WORKSPACE_PATH_HOST, 'groups', groupFolder)
     : null;
-  const globalDirHost = WORKSPACE_PATH_HOST
-    ? path.join(WORKSPACE_PATH_HOST, 'global')
+  const projectDirHost = groupDirHost
+    ? path.join(groupDirHost, 'project')
     : null;
-  const agentsMdHost = globalDirHost
-    ? path.join(globalDirHost, 'AGENTS.md')
+  const baseConfigHost = groupDirHost
+    ? path.join(groupDirHost, 'opencode.json')
+    : null;
+  const contextJsonHost = groupDirHost
+    ? path.join(groupDirHost, 'context.json')
+    : null;
+  const agentsMdHost = WORKSPACE_PATH_HOST
+    ? path.join(WORKSPACE_PATH_HOST, 'AGENTS.md')
     : null;
   // IPC dir: lives under /data in the host container → use DATA_PATH_HOST for docker run mount
   const ipcDirHost = `${DATA_PATH_HOST}/ipc/${groupFolder}`;
+  // OpenCode data dir: /data/opencode on host → /workspace/data/opencode in agent
+  const opencodeDirHost = `${DATA_PATH_HOST}/opencode`;
+  // Telegram files: /data/telegram on host → /workspace/data/telegram in agent (ro)
+  const telegramDirHost = `${DATA_PATH_HOST}/telegram`;
 
   // No port publish needed — host connects via Docker network using container name
   // Note: no --rm so we can fetch logs on crash; containers are cleaned up in spawnContainer
@@ -331,22 +320,34 @@ async function spawnContainer(
       : []),
     // Forward user-configured env vars to agent container
     ...getForwardEnvArgs(),
-    // Data dir — bind mount, same absolute host path as in compose
-    '-v',
-    `${DATA_PATH_HOST}:/data`,
-    // Workspace mounts (only if host paths resolved)
-    ...(groupDirHost ? ['-v', `${groupDirHost}:/workspace/group`] : []),
-    ...(globalDirHost &&
-    fs.existsSync(path.join(DATA_DIR, '..', 'workspace', 'global'))
-      ? ['-v', `${globalDirHost}:/workspace/global:ro`]
+    // Agent container layout: everything under /workspace
+    // Project dir (CWD) — rw
+    ...(projectDirHost ? ['-v', `${projectDirHost}:/workspace/project`] : []),
+    // Base opencode.json — ro (host-controlled model + defaults)
+    ...(baseConfigHost
+      ? ['-v', `${baseConfigHost}:/workspace/opencode.json:ro`]
       : []),
-    ...(agentsMdHost && fs.existsSync('/workspace/global/AGENTS.md')
+    // Base AGENTS.md — ro (host-controlled instructions)
+    ...(agentsMdHost && fs.existsSync('/workspace/AGENTS.md')
       ? ['-v', `${agentsMdHost}:/workspace/AGENTS.md:ro`]
       : []),
+    // Context file — ro (host writes chatJid, groupFolder, isMain before each session)
+    ...(contextJsonHost
+      ? ['-v', `${contextJsonHost}:/workspace/context.json:ro`]
+      : []),
+    // IPC dir — rw (host ↔ agent communication)
     '-v',
     `${ipcDirHost}:/workspace/ipc`,
+    // OpenCode data dir (sessions, auth) — rw
+    '-v',
+    `${opencodeDirHost}:/workspace/data/opencode`,
+    // Telegram files (photos, documents) — ro for agent
+    '-v',
+    `${telegramDirHost}:/workspace/data/telegram:ro`,
     // Skills — read-only, shared across all agent containers
-    ...(SKILLS_PATH_HOST ? ['-v', `${SKILLS_PATH_HOST}:/skills:ro`] : []),
+    ...(SKILLS_PATH_HOST
+      ? ['-v', `${SKILLS_PATH_HOST}:/workspace/skills:ro`]
+      : []),
     // Labels for cleanup
     '--label',
     `yetaclaw.group=${groupFolder}`,
@@ -555,7 +556,7 @@ export async function runAgentSession(
     baseUrl: `http://${agentName}:${OPENCODE_PORT}`,
   });
 
-  // Write context.json so the agent knows its own chatJid for IPC
+  // Write context.json to group dir (mounted ro at /workspace/context.json via base config mount)
   const contextFile = path.join(GROUPS_DIR, groupFolder, 'context.json');
   fs.writeFileSync(
     contextFile,
