@@ -1,8 +1,19 @@
 {
   "share": "disabled",
   "permission": {
+    "read": "allow",
     "edit": "allow",
-    "bash": "allow"
+    "glob": "allow",
+    "grep": "allow",
+    "list": "allow",
+    "bash": "allow",
+    "task": "allow",
+    "todowrite": "allow",
+    "webfetch": "allow",
+    "websearch": "allow",
+    "codesearch": "allow",
+    "skill": "allow",
+    "external_directory": "allow"
   },
   "mcp": {}
 }

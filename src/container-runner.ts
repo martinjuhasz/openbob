@@ -360,6 +360,9 @@ async function spawnContainer(
     `OPENCODE_PORT=${OPENCODE_PORT}`,
     '-e',
     `GROUP_FOLDER=${groupFolder}`,
+    // Enable built-in websearch tool (Exa AI — no API key required)
+    '-e',
+    'OPENCODE_ENABLE_EXA=1',
     ...(process.env['OPENCODE_LOG_LEVEL']
       ? ['-e', `OPENCODE_LOG_LEVEL=${process.env['OPENCODE_LOG_LEVEL']}`]
       : []),
