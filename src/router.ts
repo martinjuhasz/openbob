@@ -18,7 +18,15 @@ export function formatMessages(messages: NewMessage[]): string {
 }
 
 export function stripInternalTags(text: string): string {
-  return text.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
+  return (
+    text
+      // DeepSeek <think> reasoning tokens
+      .replace(/<think>[\s\S]*?<\/think>/gi, '')
+      // <internal> blocks — well-formed and malformed variants where
+      // opening/closing < or </ may be missing (e.g. "internal>...internal>")
+      .replace(/<?\/?\s*internal\s*>[\s\S]*?internal\s*>/gi, '')
+      .trim()
+  );
 }
 
 export function formatOutbound(rawText: string): string {

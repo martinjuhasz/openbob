@@ -79,6 +79,39 @@ describe('stripInternalTags', () => {
   it('returns unchanged when no internal tags', () => {
     expect(stripInternalTags('hello world')).toBe('hello world');
   });
+
+  it('removes malformed tags with missing < (DeepSeek variant)', () => {
+    expect(
+      stripInternalTags(
+        'internal>Lese die Kontextdatei, um meine Identität zu verinternal>\n\nhallo',
+      ),
+    ).toBe('hallo');
+  });
+
+  it('removes <think> blocks (DeepSeek reasoning)', () => {
+    expect(stripInternalTags('hello <think>reasoning here</think> world')).toBe(
+      'hello  world',
+    );
+  });
+
+  it('removes multiline <think> blocks', () => {
+    expect(
+      stripInternalTags('hi\n<think>\nstep 1\nstep 2\n</think>\nresult'),
+    ).toBe('hi\n\nresult');
+  });
+
+  it('removes mixed <think> and <internal> blocks', () => {
+    expect(
+      stripInternalTags(
+        '<think>planning</think>\n<internal>notes</internal>\nanswer',
+      ),
+    ).toBe('answer');
+  });
+
+  it('handles case-insensitive tags', () => {
+    expect(stripInternalTags('a <Internal>b</Internal> c')).toBe('a  c');
+    expect(stripInternalTags('a <THINK>b</THINK> c')).toBe('a  c');
+  });
 });
 
 describe('formatOutbound', () => {

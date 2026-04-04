@@ -18,6 +18,53 @@ const execFileAsync = promisify(execFile);
 
 const DOCKER = 'docker';
 const AGENT_IMAGE = process.env['AGENT_IMAGE'] ?? 'yetaclaw-agent:latest';
+
+/**
+ * Summarize session messages for debug logging.
+ * Returns a compact array of { role, textPreview, toolCalls } for the last N messages.
+ */
+function summarizeMessages(
+  messages: Array<{
+    info?: { role?: string; error?: unknown };
+    parts?: Array<{
+      type: string;
+      text?: string;
+      tool?: string;
+      state?: { status?: string; input?: unknown; error?: string };
+    }>;
+  }>,
+  limit = 10,
+): Array<Record<string, unknown>> {
+  return messages.slice(-limit).map((m) => {
+    const role = m.info?.role ?? 'unknown';
+    const parts = m.parts ?? [];
+    const textParts = parts
+      .filter((p) => p.type === 'text' && p.text)
+      .map((p) =>
+        p.text!.length > 200 ? p.text!.slice(0, 200) + '…' : p.text,
+      );
+    const toolParts = parts
+      .filter((p) => p.type === 'tool')
+      .map((p) => ({
+        tool: p.tool,
+        status: p.state?.status,
+        ...(p.state?.error ? { error: p.state.error } : {}),
+      }));
+    const reasoningParts = parts
+      .filter((p) => p.type === 'reasoning' && p.text)
+      .map((p) =>
+        p.text!.length > 100 ? p.text!.slice(0, 100) + '…' : p.text,
+      );
+    return {
+      role,
+      ...(m.info?.error ? { error: m.info.error } : {}),
+      ...(textParts.length > 0 ? { text: textParts } : {}),
+      ...(toolParts.length > 0 ? { tools: toolParts } : {}),
+      ...(reasoningParts.length > 0 ? { reasoning: reasoningParts } : {}),
+      partTypes: parts.map((p) => p.type),
+    };
+  });
+}
 const DOCKER_NETWORK = process.env['DOCKER_NETWORK'] ?? 'yetaclaw';
 // DATA_PATH: absolute path on the Docker host (same value used in compose bind mount)
 const DATA_PATH_HOST = process.env['DATA_PATH'] ?? DATA_DIR;
@@ -756,6 +803,20 @@ export async function runAgentSession(
     });
     const messages = messagesRes.data ?? [];
 
+    // On timeout or unexpected exit, log message details for debugging
+    if (pollExitReason !== 'idle') {
+      logger.warn(
+        {
+          groupFolder,
+          sessionId,
+          pollExitReason,
+          messageCount: messages.length,
+          messages: summarizeMessages(messages),
+        },
+        'Session poll ended abnormally — dumping message details',
+      );
+    }
+
     // Find last assistant message (in reverse)
     const assistantMsg = [...messages]
       .reverse()
@@ -767,7 +828,7 @@ export async function runAgentSession(
           groupFolder,
           sessionId,
           messageCount: messages.length,
-          roles: messages.map((m) => m.info?.role),
+          messages: summarizeMessages(messages),
         },
         'No assistant message found after prompt',
       );
@@ -807,7 +868,12 @@ export async function runAgentSession(
 
     if (!text) {
       logger.warn(
-        { groupFolder, sessionId, parts: assistantMsg.parts },
+        {
+          groupFolder,
+          sessionId,
+          parts: assistantMsg.parts,
+          messageSummary: summarizeMessages([assistantMsg]),
+        },
         'Empty text from OpenCode',
       );
       return {
@@ -818,7 +884,13 @@ export async function runAgentSession(
     }
 
     logger.debug(
-      { groupFolder, sessionId, chars: text.length, text },
+      {
+        groupFolder,
+        sessionId,
+        chars: text.length,
+        text,
+        messageSummary: summarizeMessages(messages.slice(-3)),
+      },
       'OpenCode response received',
     );
 
