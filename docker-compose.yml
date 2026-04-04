@@ -36,7 +36,6 @@ services:
       - INITIAL_GROUP_IS_MAIN=${INITIAL_GROUP_IS_MAIN:-true}
       # OpenViking memory — only active when profile=memory
       - OPENVIKING_URL=${OPENVIKING_URL:-}
-      - OPENVIKING_MEMORY_SCOPE=${OPENVIKING_MEMORY_SCOPE:-shared}
       - OPENVIKING_API_KEY=${OPENVIKING_API_KEY:-yetaclaw-local}
       # Optional
       - LOG_LEVEL=${LOG_LEVEL:-info}
@@ -70,6 +69,9 @@ services:
     environment:
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
       - OPENVIKING_LLM_MODEL=${OPENVIKING_LLM_MODEL:-openai/gpt-4o-mini}
+      - OPENVIKING_EMBEDDING_MODEL=${OPENVIKING_EMBEDDING_MODEL:-openai/text-embedding-3-small}
+      - OPENVIKING_EMBEDDING_API_BASE=${OPENVIKING_EMBEDDING_API_BASE:-https://openrouter.ai/api/v1}
+      - OPENVIKING_EMBEDDING_DIMENSION=${OPENVIKING_EMBEDDING_DIMENSION:-1536}
       - OPENVIKING_API_KEY=${OPENVIKING_API_KEY:-yetaclaw-local}
       - OPENVIKING_CONSOLE=${OPENVIKING_CONSOLE:-1}
     networks:
