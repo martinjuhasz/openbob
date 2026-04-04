@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { processTaskIpc, IpcDeps } from './ipc.js';
+import { processTaskIpc, resolveContainerPath, IpcDeps } from './ipc.js';
 import { GroupConfig } from './types.js';
 
 // Mock the db module
@@ -995,5 +995,44 @@ describe('processTaskIpc', () => {
       );
       expect(deleteRegisteredGroup).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe('resolveContainerPath', () => {
+  it('translates /workspace/data/ prefix to host groups dir', () => {
+    const result = resolveContainerPath(
+      '/workspace/data/screenshot.png',
+      'my-group',
+    );
+    expect(result).toBe('/data/groups/my-group/screenshot.png');
+  });
+
+  it('translates nested container paths', () => {
+    const result = resolveContainerPath(
+      '/workspace/data/telegram/files/photo_123.jpg',
+      'test-folder',
+    );
+    expect(result).toBe(
+      '/data/groups/test-folder/telegram/files/photo_123.jpg',
+    );
+  });
+
+  it('returns HTTP URLs unchanged', () => {
+    expect(resolveContainerPath('https://example.com/photo.jpg', 'grp')).toBe(
+      'https://example.com/photo.jpg',
+    );
+    expect(resolveContainerPath('http://example.com/photo.jpg', 'grp')).toBe(
+      'http://example.com/photo.jpg',
+    );
+  });
+
+  it('handles /workspace/data without trailing slash', () => {
+    expect(resolveContainerPath('/workspace/data', 'grp')).toBe(
+      '/data/groups/grp',
+    );
+  });
+
+  it('returns non-container paths unchanged', () => {
+    expect(resolveContainerPath('/tmp/file.png', 'grp')).toBe('/tmp/file.png');
   });
 });

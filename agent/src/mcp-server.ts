@@ -73,6 +73,59 @@ server.tool(
 );
 
 server.tool(
+  'send_photo',
+  'Send a photo/image to the user or group. The file must exist on the local filesystem (e.g. a screenshot taken with agent-browser). You can also pass an HTTP(S) URL.',
+  {
+    source: z
+      .string()
+      .describe(
+        'Absolute file path (e.g. /workspace/data/screenshot.png) or HTTP(S) URL',
+      ),
+    caption: z.string().optional().describe('Optional caption for the photo'),
+  },
+  async (args: { source: string; caption?: string }) => {
+    const ctx = readContext();
+    writeIpcFile(MESSAGES_DIR, {
+      type: 'send_photo',
+      chatJid: ctx.chatJid,
+      source: args.source,
+      ...(args.caption && { caption: args.caption }),
+      groupFolder: ctx.groupFolder,
+      timestamp: new Date().toISOString(),
+    });
+    return { content: [{ type: 'text' as const, text: 'Photo sent.' }] };
+  },
+);
+
+server.tool(
+  'send_document',
+  'Send a document/file to the user or group. The file must exist on the local filesystem. You can also pass an HTTP(S) URL.',
+  {
+    source: z
+      .string()
+      .describe(
+        'Absolute file path (e.g. /workspace/data/report.pdf) or HTTP(S) URL',
+      ),
+    caption: z
+      .string()
+      .optional()
+      .describe('Optional caption for the document'),
+  },
+  async (args: { source: string; caption?: string }) => {
+    const ctx = readContext();
+    writeIpcFile(MESSAGES_DIR, {
+      type: 'send_document',
+      chatJid: ctx.chatJid,
+      source: args.source,
+      ...(args.caption && { caption: args.caption }),
+      groupFolder: ctx.groupFolder,
+      timestamp: new Date().toISOString(),
+    });
+    return { content: [{ type: 'text' as const, text: 'Document sent.' }] };
+  },
+);
+
+server.tool(
   'schedule_task',
   `Schedule a recurring or one-time task. The task will run as a full agent with access to all tools.
 

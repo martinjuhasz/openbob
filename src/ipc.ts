@@ -38,6 +38,35 @@ export interface IpcDeps {
   onGroupDeleted: (folder: string, jid: string) => void;
 }
 
+/**
+ * Translate a container-relative file path to the host-side path.
+ * Agent containers mount `groups/<folder>/` as `/workspace/data/`, so
+ * `/workspace/data/screenshot.png` → `GROUPS_DIR/<folder>/screenshot.png`.
+ * HTTP(S) URLs and already-absolute host paths are returned unchanged.
+ */
+const CONTAINER_DATA_PREFIX = '/workspace/data/';
+
+export function resolveContainerPath(
+  source: string,
+  groupFolder: string,
+): string {
+  if (source.startsWith('http://') || source.startsWith('https://')) {
+    return source;
+  }
+  if (source.startsWith(CONTAINER_DATA_PREFIX)) {
+    return path.join(
+      GROUPS_DIR,
+      groupFolder,
+      source.slice(CONTAINER_DATA_PREFIX.length),
+    );
+  }
+  // Exact match for /workspace/data without trailing content
+  if (source === '/workspace/data') {
+    return path.join(GROUPS_DIR, groupFolder);
+  }
+  return source;
+}
+
 let ipcWatcherRunning = false;
 
 export function startIpcWatcher(deps: IpcDeps): void {
@@ -115,9 +144,18 @@ export function startIpcWatcher(deps: IpcDeps): void {
                   isMain ||
                   (targetGroup && targetGroup.folder === sourceGroup)
                 ) {
-                  await deps.sendPhoto(data.chatJid, data.source, data.caption);
+                  const hostSource = resolveContainerPath(
+                    data.source,
+                    sourceGroup,
+                  );
+                  await deps.sendPhoto(data.chatJid, hostSource, data.caption);
                   logger.info(
-                    { chatJid: data.chatJid, source: data.source, sourceGroup },
+                    {
+                      chatJid: data.chatJid,
+                      source: data.source,
+                      hostSource,
+                      sourceGroup,
+                    },
                     'IPC photo sent',
                   );
                 } else {
@@ -136,13 +174,22 @@ export function startIpcWatcher(deps: IpcDeps): void {
                   isMain ||
                   (targetGroup && targetGroup.folder === sourceGroup)
                 ) {
+                  const hostSource = resolveContainerPath(
+                    data.source,
+                    sourceGroup,
+                  );
                   await deps.sendDocument(
                     data.chatJid,
-                    data.source,
+                    hostSource,
                     data.caption,
                   );
                   logger.info(
-                    { chatJid: data.chatJid, source: data.source, sourceGroup },
+                    {
+                      chatJid: data.chatJid,
+                      source: data.source,
+                      hostSource,
+                      sourceGroup,
+                    },
                     'IPC document sent',
                   );
                 } else {
