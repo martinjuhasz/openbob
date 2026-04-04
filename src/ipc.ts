@@ -1,4 +1,4 @@
-// IPC watcher — polls DATA_DIR/ipc/<group>/{messages,tasks}/ for JSON files
+// IPC watcher — polls GROUPS_DIR/<group>/ipc/{messages,tasks}/ for JSON files
 // dropped there by agent containers to send messages or manage scheduled tasks
 
 import fs from 'fs';
@@ -6,7 +6,7 @@ import path from 'path';
 
 import { CronExpressionParser } from 'cron-parser';
 
-import { channelFromJid, DATA_DIR, POLL_INTERVAL } from './config.js';
+import { channelFromJid, GROUPS_DIR, POLL_INTERVAL } from './config.js';
 import {
   deleteTask,
   getActiveTasks,
@@ -43,15 +43,14 @@ export function startIpcWatcher(deps: IpcDeps): void {
   }
   ipcWatcherRunning = true;
 
-  const ipcBaseDir = path.join(DATA_DIR, 'ipc');
-  fs.mkdirSync(ipcBaseDir, { recursive: true });
+  fs.mkdirSync(GROUPS_DIR, { recursive: true });
 
   const processIpcFiles = async () => {
     let groupFolders: string[];
     try {
-      groupFolders = fs.readdirSync(ipcBaseDir).filter((f) => {
-        const stat = fs.statSync(path.join(ipcBaseDir, f));
-        return stat.isDirectory() && f !== 'errors';
+      groupFolders = fs.readdirSync(GROUPS_DIR).filter((f) => {
+        const stat = fs.statSync(path.join(GROUPS_DIR, f));
+        return stat.isDirectory();
       });
       // eslint-disable-next-line no-catch-all/no-catch-all -- poll loop: retry on next interval
     } catch (err) {
@@ -72,8 +71,8 @@ export function startIpcWatcher(deps: IpcDeps): void {
 
     for (const sourceGroup of groupFolders) {
       const isMain = folderIsMain.get(sourceGroup) === true;
-      const messagesDir = path.join(ipcBaseDir, sourceGroup, 'messages');
-      const tasksDir = path.join(ipcBaseDir, sourceGroup, 'tasks');
+      const messagesDir = path.join(GROUPS_DIR, sourceGroup, 'ipc', 'messages');
+      const tasksDir = path.join(GROUPS_DIR, sourceGroup, 'ipc', 'tasks');
 
       // Process message files
       try {
@@ -156,7 +155,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
                 { file, sourceGroup, err },
                 'Error processing IPC message',
               );
-              moveToErrors(ipcBaseDir, filePath, sourceGroup, file);
+              moveToErrors(filePath, sourceGroup, file);
             }
           }
         }
@@ -192,7 +191,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
                 { file, sourceGroup, err },
                 'Error processing IPC task',
               );
-              moveToErrors(ipcBaseDir, filePath, sourceGroup, file);
+              moveToErrors(filePath, sourceGroup, file);
             }
           }
         }
@@ -210,13 +209,12 @@ export function startIpcWatcher(deps: IpcDeps): void {
 }
 
 function moveToErrors(
-  ipcBaseDir: string,
   filePath: string,
   sourceGroup: string,
   file: string,
 ): void {
   try {
-    const errorDir = path.join(ipcBaseDir, 'errors');
+    const errorDir = path.join(GROUPS_DIR, sourceGroup, 'ipc', 'errors');
     fs.mkdirSync(errorDir, { recursive: true });
     fs.renameSync(filePath, path.join(errorDir, `${sourceGroup}-${file}`));
     // eslint-disable-next-line no-catch-all/no-catch-all -- last-ditch: ignore rename errors
@@ -438,7 +436,7 @@ export async function processTaskIpc(
     case 'list_tasks': {
       if (!data.requestId) break;
       const tasks = isMain ? getAllTasks() : getTasksForGroup(sourceGroup);
-      const responseDir = path.join(DATA_DIR, 'ipc', sourceGroup, 'input');
+      const responseDir = path.join(GROUPS_DIR, sourceGroup, 'ipc', 'input');
       fs.mkdirSync(responseDir, { recursive: true });
       const responsePath = path.join(responseDir, `${data.requestId}.json`);
       const tempPath = `${responsePath}.tmp`;

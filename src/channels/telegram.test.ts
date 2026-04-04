@@ -106,7 +106,7 @@ vi.mock('./registry.js', () => ({
 // Mock config
 vi.mock('../config.js', () => ({
   ASSISTANT_NAME: 'yetaclaw',
-  DATA_DIR: '/test-data',
+  GROUPS_DIR: '/test-data/groups',
 }));
 
 import { TelegramChannel } from './telegram.js';
@@ -934,14 +934,19 @@ describe('TelegramChannel', () => {
       expect(getFileUrl).toContain('bot' + 'test-bot-token');
 
       // Should create the directory
-      expect(mockMkdirSync).toHaveBeenCalledWith('/test-data/telegram/files', {
-        recursive: true,
-      });
+      expect(mockMkdirSync).toHaveBeenCalledWith(
+        '/test-data/groups/test/telegram/files',
+        {
+          recursive: true,
+        },
+      );
 
       // Should write the file with correct content
       expect(mockWriteFileSync).toHaveBeenCalledOnce();
       const writePath = mockWriteFileSync.mock.calls[0]?.[0] as string;
-      expect(writePath).toMatch(/^\/test-data\/telegram\/files\/photo_50_/);
+      expect(writePath).toMatch(
+        /^\/test-data\/groups\/test\/telegram\/files\/photo_50_/,
+      );
       expect(writePath).toMatch(/\.jpg$/);
       const writtenBuffer = mockWriteFileSync.mock.calls[0]?.[1] as Buffer;
       expect([...writtenBuffer]).toEqual([...fileBytes]);
@@ -1155,13 +1160,16 @@ describe('TelegramChannel', () => {
       expect(getFileUrl).toContain('file_id=doc_file_id');
 
       // Should create directory and write file
-      expect(mockMkdirSync).toHaveBeenCalledWith('/test-data/telegram/files', {
-        recursive: true,
-      });
+      expect(mockMkdirSync).toHaveBeenCalledWith(
+        '/test-data/groups/test/telegram/files',
+        {
+          recursive: true,
+        },
+      );
       expect(mockWriteFileSync).toHaveBeenCalledOnce();
       const writePath = mockWriteFileSync.mock.calls[0]?.[0] as string;
       expect(writePath).toMatch(
-        /^\/test-data\/telegram\/files\/doc_60_\d+_report\.pdf$/,
+        /^\/test-data\/groups\/test\/telegram\/files\/doc_60_\d+_report\.pdf$/,
       );
       const writtenBuffer = mockWriteFileSync.mock.calls[0]?.[1] as Buffer;
       expect([...writtenBuffer]).toEqual([...fileBytes]);

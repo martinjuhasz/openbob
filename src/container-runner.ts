@@ -210,8 +210,8 @@ function getForwardEnvArgs(): string[] {
  * Reads /workspace/opencode.json as the base template (share, permission, mcp, etc.),
  * overlays the group's model, and writes the result to the group directory.
  * Mounted read-only at /workspace/opencode.json inside the agent container.
- * OpenCode's findUp from CWD (/workspace/project) discovers this as the parent config.
- * Agents can create their own /workspace/project/opencode.json to override settings.
+ * OpenCode's findUp from CWD (/workspace/data/project) discovers this as the parent config.
+ * Agents can create their own /workspace/data/project/opencode.json to override settings.
  *
  * The base config is written fresh each time (no merging with existing per-group config).
  */
@@ -258,10 +258,23 @@ async function spawnContainer(
   fs.mkdirSync(groupDir, { recursive: true });
   fs.chmodSync(groupDir, 0o777);
 
-  // Create project subdirectory for agent's CWD (rw)
+  // Create subdirectories for agent's runtime data (all under one group dir)
   const projectDir = path.join(groupDir, 'project');
-  fs.mkdirSync(projectDir, { recursive: true });
-  fs.chmodSync(projectDir, 0o777);
+  const ipcDir = path.join(groupDir, 'ipc');
+  const ipcTasksDir = path.join(ipcDir, 'tasks');
+  const ipcInputDir = path.join(ipcDir, 'input');
+  const opencodeDir = path.join(groupDir, 'opencode');
+  const telegramDir = path.join(groupDir, 'telegram');
+  for (const dir of [
+    projectDir,
+    ipcTasksDir,
+    ipcInputDir,
+    opencodeDir,
+    telegramDir,
+  ]) {
+    fs.mkdirSync(dir, { recursive: true });
+    fs.chmodSync(dir, 0o777);
+  }
 
   // Write base opencode.json (mounted ro at /workspace/opencode.json)
   writeOpencodeConfig(groupFolder, model);
@@ -276,44 +289,14 @@ async function spawnContainer(
     );
   }
 
-  const ipcDir = path.join(DATA_DIR, 'ipc', groupFolder);
-  const ipcTasksDir = path.join(ipcDir, 'tasks');
-  const ipcInputDir = path.join(ipcDir, 'input');
-  fs.mkdirSync(ipcTasksDir, { recursive: true });
-  fs.mkdirSync(ipcInputDir, { recursive: true });
-  fs.chmodSync(ipcDir, 0o777);
-  fs.chmodSync(ipcTasksDir, 0o777);
-  fs.chmodSync(ipcInputDir, 0o777);
-
-  // Pre-create opencode data dir so the node user can access it in the agent container
-  const opencodeDir = path.join(DATA_DIR, 'opencode');
-  fs.mkdirSync(opencodeDir, { recursive: true });
-  fs.chmodSync(opencodeDir, 0o777);
-
-  // Compute host-side paths for agent container mounts
-  // WORKSPACE_PATH_HOST = actual host path for /workspace inside this (host) container
-  // New agent layout: everything under /workspace in the agent container
-  const groupDirHost = WORKSPACE_PATH_HOST
-    ? path.join(WORKSPACE_PATH_HOST, 'groups', groupFolder)
-    : null;
-  const projectDirHost = groupDirHost
-    ? path.join(groupDirHost, 'project')
-    : null;
-  const baseConfigHost = groupDirHost
-    ? path.join(groupDirHost, 'opencode.json')
-    : null;
-  const contextJsonHost = groupDirHost
-    ? path.join(groupDirHost, 'context.json')
-    : null;
+  // Compute host-side path for the group directory mount
+  // DATA_PATH_HOST = actual host path for DATA_DIR (for docker run bind mounts)
+  const groupDirHost = `${DATA_PATH_HOST}/groups/${groupFolder}`;
+  const baseConfigHost = `${groupDirHost}/opencode.json`;
+  const contextJsonHost = `${groupDirHost}/context.json`;
   const agentsMdHost = WORKSPACE_PATH_HOST
     ? path.join(WORKSPACE_PATH_HOST, 'AGENTS.md')
     : null;
-  // IPC dir: lives under /data in the host container → use DATA_PATH_HOST for docker run mount
-  const ipcDirHost = `${DATA_PATH_HOST}/ipc/${groupFolder}`;
-  // OpenCode data dir: /data/opencode on host → /workspace/data/opencode in agent
-  const opencodeDirHost = `${DATA_PATH_HOST}/opencode`;
-  // Telegram files: /data/telegram on host → /workspace/data/telegram in agent (ro)
-  const telegramDirHost = `${DATA_PATH_HOST}/telegram`;
 
   // No port publish needed — host connects via Docker network using container name
   // Note: no --rm so we can fetch logs on crash; containers are cleaned up in spawnContainer
@@ -336,29 +319,19 @@ async function spawnContainer(
     // Forward user-configured env vars to agent container
     ...getForwardEnvArgs(),
     // Agent container layout: everything under /workspace
-    // Project dir (CWD) — rw
-    ...(projectDirHost ? ['-v', `${projectDirHost}:/workspace/project`] : []),
+    // Group data dir — rw (project, ipc, opencode, telegram all inside)
+    '-v',
+    `${groupDirHost}:/workspace/data`,
     // Base opencode.json — ro (host-controlled model + defaults)
-    ...(baseConfigHost
-      ? ['-v', `${baseConfigHost}:/workspace/opencode.json:ro`]
-      : []),
+    '-v',
+    `${baseConfigHost}:/workspace/opencode.json:ro`,
     // Base AGENTS.md — ro (host-controlled instructions)
     ...(agentsMdHost && fs.existsSync('/workspace/AGENTS.md')
       ? ['-v', `${agentsMdHost}:/workspace/AGENTS.md:ro`]
       : []),
     // Context file — ro (host writes chatJid, groupFolder, isMain before each session)
-    ...(contextJsonHost
-      ? ['-v', `${contextJsonHost}:/workspace/context.json:ro`]
-      : []),
-    // IPC dir — rw (host ↔ agent communication)
     '-v',
-    `${ipcDirHost}:/workspace/ipc`,
-    // OpenCode data dir (sessions, auth) — rw
-    '-v',
-    `${opencodeDirHost}:/workspace/data/opencode`,
-    // Telegram files (photos, documents) — ro for agent
-    '-v',
-    `${telegramDirHost}:/workspace/data/telegram:ro`,
+    `${contextJsonHost}:/workspace/context.json:ro`,
     // Skills — read-only, shared across all agent containers
     ...(SKILLS_PATH_HOST
       ? ['-v', `${SKILLS_PATH_HOST}:/workspace/skills:ro`]
@@ -571,7 +544,7 @@ export async function runAgentSession(
     baseUrl: `http://${agentName}:${OPENCODE_PORT}`,
   });
 
-  // Write context.json to group dir (mounted ro at /workspace/context.json via base config mount)
+  // Write context.json to group dir (mounted ro at /workspace/context.json)
   const contextFile = path.join(GROUPS_DIR, groupFolder, 'context.json');
   fs.writeFileSync(
     contextFile,

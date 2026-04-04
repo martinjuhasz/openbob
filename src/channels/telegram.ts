@@ -8,7 +8,7 @@ import path from 'path';
 import { Bot, InputFile } from 'grammy';
 import type { Api } from 'grammy';
 
-import { ASSISTANT_NAME, DATA_DIR } from '../config.js';
+import { ASSISTANT_NAME, GROUPS_DIR } from '../config.js';
 import { logger } from '../logger.js';
 import {
   Channel,
@@ -282,8 +282,13 @@ export class TelegramChannel implements Channel {
         // Use the highest resolution variant (last element)
         const photo = photos[photos.length - 1];
 
-        // Save to data/telegram/files/ (visible at /workspace/data/telegram/files/ in agent)
-        const filesDir = path.join(DATA_DIR, 'telegram', 'files');
+        // Save to groups/<group>/telegram/files/ (visible at /workspace/data/telegram/files/ in agent)
+        const filesDir = path.join(
+          GROUPS_DIR,
+          group.folder,
+          'telegram',
+          'files',
+        );
         fs.mkdirSync(filesDir, { recursive: true });
 
         const filename = `photo_${ctx.message.message_id}_${Date.now()}.jpg`;
@@ -331,7 +336,12 @@ export class TelegramChannel implements Channel {
           return;
         }
 
-        const filesDir = path.join(DATA_DIR, 'telegram', 'files');
+        const filesDir = path.join(
+          GROUPS_DIR,
+          group.folder,
+          'telegram',
+          'files',
+        );
         fs.mkdirSync(filesDir, { recursive: true });
 
         const filename = `doc_${ctx.message.message_id}_${Date.now()}_${docName}`;

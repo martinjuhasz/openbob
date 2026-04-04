@@ -3,7 +3,8 @@
 import path from 'path';
 
 export const DATA_DIR = process.env['DATA_DIR'] ?? '/data';
-export const GROUPS_DIR = process.env['GROUPS_DIR'] ?? '/workspace/groups';
+/** Per-group runtime directories live under DATA_DIR/groups/<folder>/ */
+export const GROUPS_DIR = path.join(DATA_DIR, 'groups');
 export const SKILLS_DIR = process.env['SKILLS_DIR'] ?? '/skills';
 export const POLL_INTERVAL = 2000; // ms
 export const ASSISTANT_NAME = process.env['ASSISTANT_NAME'] ?? 'yetaclaw';

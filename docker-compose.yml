@@ -8,8 +8,8 @@ services:
     restart: unless-stopped
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock # Spawn agent containers
-      - ${DATA_PATH}:/data # DB + IPC + opencode data
-      - ./workspace:/workspace # Groups + AGENTS.md
+      - ${DATA_PATH}:/data # DB + per-group data (ipc, opencode, telegram, project)
+      - ./workspace:/workspace # AGENTS.md + base opencode.json template
       - ./skills:/skills:ro # Skills (read-only, mounted into agent containers)
     environment:
       # Mattermost
@@ -24,7 +24,6 @@ services:
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
       # Paths inside container
       - DATA_DIR=/data
-      - GROUPS_DIR=/workspace/groups
       # Docker
       - DOCKER_NETWORK=yetaclaw
       - AGENT_IMAGE=yetaclaw-agent:latest

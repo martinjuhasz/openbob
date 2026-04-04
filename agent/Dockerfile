@@ -44,18 +44,19 @@ RUN npm run build
 
 # All runtime directories live under /workspace (mounted at runtime)
 RUN mkdir -p \
-    /workspace/project \
+    /workspace/data/project \
     /workspace/data/opencode \
+    /workspace/data/telegram \
+    /workspace/data/ipc/messages \
+    /workspace/data/ipc/tasks \
+    /workspace/data/ipc/input \
     /workspace/skills \
-    /workspace/ipc/messages \
-    /workspace/ipc/tasks \
-    /workspace/ipc/input \
     /home/node/.local/share
 
 RUN chown -R node:node /workspace /home/node && chmod 777 /home/node
 USER node
 
-WORKDIR /workspace/project
+WORKDIR /workspace/data/project
 
 # Symlink ~/.local/share/opencode → /workspace/data/opencode so OpenCode finds its auth + config
 ENTRYPOINT ["sh", "-c", "ln -sfn /workspace/data/opencode /home/node/.local/share/opencode && exec node /app/dist/index.js"]
