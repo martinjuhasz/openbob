@@ -78,9 +78,11 @@ You have built-in tools for all actions. Use them directly — do not write IPC 
 
 ### Group Management (main group only)
 
+**list_groups** — List all registered groups. Main group sees all; others see only their own.
+
 **register_group** — Register a new chat group so the bot responds there.
 
-- `jid`: channel JID from the user (format: `mm:<channel-id>`)
+- `jid`: channel JID from the user (format: `tg:<chat-id>` or `mm:<channel-id>`)
 - `name`: display name
 - `folder`: short slug, no spaces (e.g. `"homebase"`)
 - `trigger`: word users type to address the bot (e.g. `"winston"`)
@@ -90,9 +92,15 @@ You have built-in tools for all actions. Use them directly — do not write IPC 
 
 **update_group** — Update settings for an existing group.
 
-- `jid`: JID of the group to update (required)
+- `folder`: folder slug of the group to update (required identifier)
+- `jid` (optional): new channel JID — migrates the group to a different channel
 - `name`, `trigger`, `always_respond`, `model`: all optional
 - Set `model` to empty string to clear the override and use the global default.
+
+**delete_group** — Delete a registered group and stop its agent container.
+
+- `folder`: folder slug of the group to delete
+- Cannot delete the main group.
 
 ## Available Skills
 

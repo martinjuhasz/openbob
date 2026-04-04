@@ -51,7 +51,7 @@ src/                     # Host — orchestrator
 
 agent/                   # Agent — runs inside Docker containers
   src/index.ts           # OpenCode server on port 4096
-  src/mcp-server.ts      # 9 MCP tools (send_message, schedule_task, etc.)
+  src/mcp-server.ts      # 12 MCP tools (send_message, schedule_task, list_groups, delete_group, etc.)
 
 workspace/
   AGENTS.md              # agent instructions (mounted read-only into containers)
@@ -63,7 +63,7 @@ Host and agent are separate npm packages with separate `tsconfig.json`. ESLint o
 
 ## IPC Mechanism
 
-Agents write JSON files to `/workspace/ipc/tasks/` or `/workspace/ipc/messages/`. Host polls every 2 seconds. For request-response (e.g. `list_tasks`), agent writes a request, host writes response to `/workspace/ipc/input/`, agent polls up to 10s.
+Agents write JSON files to `/workspace/ipc/tasks/` or `/workspace/ipc/messages/`. Host polls every 2 seconds. For request-response (e.g. `list_tasks`, `list_groups`), agent writes a request, host writes response to `/workspace/ipc/input/`, agent polls up to 10s.
 
 ## Key Patterns
 

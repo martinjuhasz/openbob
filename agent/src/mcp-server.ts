@@ -327,6 +327,87 @@ Main group sees all tasks across groups; other groups see only their own.`,
 );
 
 server.tool(
+  'list_groups',
+  `List all registered groups/chats. Returns JID, name, folder, trigger, channel, and settings for each group.
+Main group sees all groups; other groups see only their own.`,
+  {},
+  async () => {
+    const ctx = readContext();
+    const requestId = `req-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+    writeIpcFile(TASKS_DIR, {
+      type: 'list_groups',
+      requestId,
+      groupFolder: ctx.groupFolder,
+      timestamp: new Date().toISOString(),
+    });
+
+    // Poll for response from host
+    const responsePath = path.join(IPC_DIR, 'input', `${requestId}.json`);
+    const deadline = Date.now() + 10_000;
+    while (Date.now() < deadline) {
+      try {
+        const raw = fs.readFileSync(responsePath, 'utf-8');
+        fs.unlinkSync(responsePath);
+        const data = JSON.parse(raw) as {
+          groups: Array<{
+            jid: string;
+            name: string;
+            folder: string;
+            trigger: string;
+            channel: string;
+            is_main: boolean;
+            always_respond: boolean;
+            model: string | null;
+          }>;
+        };
+        if (data.groups.length === 0) {
+          return {
+            content: [{ type: 'text' as const, text: 'No registered groups.' }],
+          };
+        }
+        const lines = data.groups.map((g) => {
+          const flags = [
+            g.is_main ? 'main' : null,
+            g.always_respond ? 'always-respond' : null,
+          ]
+            .filter(Boolean)
+            .join(', ');
+          return [
+            `Name: ${g.name}`,
+            `  JID: ${g.jid}`,
+            `  Folder: ${g.folder}`,
+            `  Trigger: ${g.trigger}`,
+            `  Channel: ${g.channel}`,
+            ...(g.model ? [`  Model: ${g.model}`] : []),
+            ...(flags ? [`  Flags: ${flags}`] : []),
+          ].join('\n');
+        });
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: `${data.groups.length} group(s):\n\n${lines.join('\n\n')}`,
+            },
+          ],
+        };
+      } catch {
+        await new Promise((r) => setTimeout(r, 250));
+      }
+    }
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: 'Timeout waiting for group list from host.',
+        },
+      ],
+      isError: true,
+    };
+  },
+);
+
+server.tool(
   'update_task',
   `Update an existing scheduled task. Only provide the fields you want to change.
 If you change schedule_type, you must also provide a matching schedule_value.`,
@@ -491,9 +572,16 @@ Get the channel JID from the user — format: "tg:<chat-id>" for Telegram or "mm
 
 server.tool(
   'update_group',
-  'Update settings for an existing group. Main group only.',
+  `Update settings for an existing group. Main group only.
+Identify the group by its folder name. You can change any field including the JID (channel migration).`,
   {
-    jid: z.string().describe('JID of the group to update'),
+    folder: z.string().describe('Folder slug of the group to update'),
+    jid: z
+      .string()
+      .optional()
+      .describe(
+        'New channel JID — migrates the group to a different channel (e.g. "tg:-1001234567890")',
+      ),
     name: z.string().optional(),
     trigger: z.string().optional(),
     always_respond: z.boolean().optional(),
@@ -505,7 +593,8 @@ server.tool(
       ),
   },
   async (args: {
-    jid: string;
+    folder: string;
+    jid?: string;
     name?: string;
     trigger?: string;
     always_respond?: boolean;
@@ -525,9 +614,10 @@ server.tool(
     }
     const data: Record<string, unknown> = {
       type: 'update_group',
-      jid: args.jid,
+      folder: args.folder,
       timestamp: new Date().toISOString(),
     };
+    if (args.jid !== undefined) data.jid = args.jid;
     if (args.name !== undefined) data.name = args.name;
     if (args.trigger !== undefined) data.trigger = args.trigger;
     if (args.always_respond !== undefined)
@@ -536,6 +626,41 @@ server.tool(
     writeIpcFile(TASKS_DIR, data);
     return {
       content: [{ type: 'text' as const, text: `Group update submitted.` }],
+    };
+  },
+);
+
+server.tool(
+  'delete_group',
+  'Delete a registered group and stop its agent container. Main group only. Cannot delete the main group itself.',
+  {
+    folder: z.string().describe('Folder slug of the group to delete'),
+  },
+  async (args: { folder: string }) => {
+    const ctx = readContext();
+    if (!ctx.isMain) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: 'Only the main group can delete groups.',
+          },
+        ],
+        isError: true,
+      };
+    }
+    writeIpcFile(TASKS_DIR, {
+      type: 'delete_group',
+      folder: args.folder,
+      timestamp: new Date().toISOString(),
+    });
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: `Group "${args.folder}" deletion submitted. Container will be stopped.`,
+        },
+      ],
     };
   },
 );

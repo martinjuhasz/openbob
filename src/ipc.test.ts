@@ -8,9 +8,12 @@ vi.mock('./db.js', () => ({
   getTaskById: vi.fn(() => undefined),
   getTasksForGroup: vi.fn(() => []),
   getAllTasks: vi.fn(() => []),
+  getAllRegisteredGroups: vi.fn(() => ({})),
   updateTask: vi.fn(),
   upsertTask: vi.fn(),
   deleteTask: vi.fn(),
+  deleteRegisteredGroup: vi.fn(),
+  migrateGroupJid: vi.fn(() => true),
   setRegisteredGroup: vi.fn(),
 }));
 
@@ -37,7 +40,10 @@ import {
   getTaskById,
   getTasksForGroup,
   getAllTasks,
+  getAllRegisteredGroups,
   updateTask,
+  deleteRegisteredGroup,
+  migrateGroupJid,
   setRegisteredGroup,
 } from './db.js';
 
@@ -61,14 +67,16 @@ function makeDeps(groups: Record<string, GroupConfig> = {}): IpcDeps & {
   documentsSent: Array<{ source: string; caption?: string }>;
   tasksChanged: number[];
   registered: GroupConfig[];
-  updated: GroupConfig[];
+  updated: Array<{ config: GroupConfig; oldJid?: string }>;
+  deleted: Array<{ folder: string; jid: string }>;
 } {
   const sent: string[] = [];
   const photosSent: Array<{ source: string; caption?: string }> = [];
   const documentsSent: Array<{ source: string; caption?: string }> = [];
   const tasksChanged: number[] = [];
   const registered: GroupConfig[] = [];
-  const updated: GroupConfig[] = [];
+  const updated: Array<{ config: GroupConfig; oldJid?: string }> = [];
+  const deleted: Array<{ folder: string; jid: string }> = [];
   return {
     sent,
     photosSent,
@@ -76,6 +84,7 @@ function makeDeps(groups: Record<string, GroupConfig> = {}): IpcDeps & {
     tasksChanged,
     registered,
     updated,
+    deleted,
     sendMessage: async (_jid, text) => {
       sent.push(text);
     },
@@ -92,8 +101,11 @@ function makeDeps(groups: Record<string, GroupConfig> = {}): IpcDeps & {
     onGroupRegistered: (config) => {
       registered.push(config);
     },
-    onGroupUpdated: (config) => {
-      updated.push(config);
+    onGroupUpdated: (config, oldJid) => {
+      updated.push({ config, oldJid });
+    },
+    onGroupDeleted: (folder, jid) => {
+      deleted.push({ folder, jid });
     },
   };
 }
@@ -738,7 +750,7 @@ describe('processTaskIpc', () => {
       await processTaskIpc(
         {
           type: 'update_group',
-          jid: 'mm:abc',
+          folder: 'grp',
           trigger: 'bot',
           alwaysRespond: true,
         },
@@ -748,17 +760,17 @@ describe('processTaskIpc', () => {
         deps,
       );
       expect(setRegisteredGroup).toHaveBeenCalledOnce();
-      expect(deps.updated[0]).toMatchObject({
+      expect(deps.updated[0]?.config).toMatchObject({
         trigger: 'bot',
         alwaysRespond: true,
       });
     });
 
     it('blocks update from non-main group', async () => {
-      const existing = { 'mm:abc': makeGroup() };
+      const existing = { 'mm:abc': makeGroup({ folder: 'grp' }) };
       const deps = makeDeps(existing);
       await processTaskIpc(
-        { type: 'update_group', jid: 'mm:abc', alwaysRespond: true },
+        { type: 'update_group', folder: 'grp', alwaysRespond: true },
         'test-group',
         false,
         new Map(),
@@ -767,16 +779,221 @@ describe('processTaskIpc', () => {
       expect(setRegisteredGroup).not.toHaveBeenCalled();
     });
 
-    it('blocks update for unknown jid', async () => {
+    it('blocks update for unknown folder', async () => {
       const deps = makeDeps({});
       await processTaskIpc(
-        { type: 'update_group', jid: 'mm:unknown', alwaysRespond: true },
+        { type: 'update_group', folder: 'no-such-folder', alwaysRespond: true },
         'main-group',
         true,
         new Map(),
         deps,
       );
       expect(setRegisteredGroup).not.toHaveBeenCalled();
+    });
+
+    it('migrates jid when new jid is provided', async () => {
+      const existing = {
+        'mm:old': makeGroup({ jid: 'mm:old', folder: 'grp' }),
+      };
+      const deps = makeDeps(existing);
+      vi.mocked(migrateGroupJid).mockReturnValue(true);
+      await processTaskIpc(
+        { type: 'update_group', folder: 'grp', jid: 'tg:new' },
+        'main-group',
+        true,
+        new Map(),
+        deps,
+      );
+      expect(migrateGroupJid).toHaveBeenCalledWith('mm:old', 'tg:new');
+      expect(setRegisteredGroup).toHaveBeenCalledOnce();
+      expect(deps.updated[0]?.config.jid).toBe('tg:new');
+      expect(deps.updated[0]?.config.channel).toBe('telegram');
+      expect(deps.updated[0]?.oldJid).toBe('mm:old');
+    });
+
+    it('blocks jid migration when new jid already in use', async () => {
+      const existing = {
+        'mm:abc': makeGroup({ jid: 'mm:abc', folder: 'grp-a' }),
+        'mm:def': makeGroup({ jid: 'mm:def', folder: 'grp-b' }),
+      };
+      const deps = makeDeps(existing);
+      await processTaskIpc(
+        { type: 'update_group', folder: 'grp-a', jid: 'mm:def' },
+        'main-group',
+        true,
+        new Map(),
+        deps,
+      );
+      expect(migrateGroupJid).not.toHaveBeenCalled();
+      expect(setRegisteredGroup).not.toHaveBeenCalled();
+    });
+
+    it('blocks jid migration when migrateGroupJid fails', async () => {
+      const existing = {
+        'mm:old': makeGroup({ jid: 'mm:old', folder: 'grp' }),
+      };
+      const deps = makeDeps(existing);
+      vi.mocked(migrateGroupJid).mockReturnValue(false);
+      await processTaskIpc(
+        { type: 'update_group', folder: 'grp', jid: 'tg:new' },
+        'main-group',
+        true,
+        new Map(),
+        deps,
+      );
+      expect(migrateGroupJid).toHaveBeenCalledWith('mm:old', 'tg:new');
+      expect(setRegisteredGroup).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('list_groups', () => {
+    it('writes response with all groups for main group', async () => {
+      const existing = {
+        'mm:abc': makeGroup({
+          jid: 'mm:abc',
+          folder: 'admin',
+          name: 'Admin',
+          isMain: true,
+        }),
+        'tg:123': makeGroup({
+          jid: 'tg:123',
+          folder: 'home',
+          name: 'Home',
+          channel: 'telegram',
+        }),
+      };
+      vi.mocked(getAllRegisteredGroups).mockReturnValue(existing);
+      const deps = makeDeps(existing);
+      await processTaskIpc(
+        { type: 'list_groups', requestId: 'req-1' },
+        'admin',
+        true,
+        new Map(),
+        deps,
+      );
+      expect(fs.mkdirSync).toHaveBeenCalled();
+      expect(fs.writeFileSync).toHaveBeenCalledOnce();
+      const written = vi.mocked(fs.writeFileSync).mock.calls[0]?.[1] as string;
+      const parsed = JSON.parse(written) as {
+        groups: Array<{ jid: string; name: string }>;
+      };
+      expect(parsed.groups).toHaveLength(2);
+      expect(parsed.groups.map((g) => g.name).sort()).toEqual([
+        'Admin',
+        'Home',
+      ]);
+    });
+
+    it('filters to own group for non-main', async () => {
+      const existing = {
+        'mm:abc': makeGroup({
+          jid: 'mm:abc',
+          folder: 'admin',
+          isMain: true,
+        }),
+        'tg:123': makeGroup({ jid: 'tg:123', folder: 'home' }),
+      };
+      vi.mocked(getAllRegisteredGroups).mockReturnValue(existing);
+      const deps = makeDeps(existing);
+      await processTaskIpc(
+        { type: 'list_groups', requestId: 'req-2' },
+        'home',
+        false,
+        new Map(),
+        deps,
+      );
+      const written = vi.mocked(fs.writeFileSync).mock.calls[0]?.[1] as string;
+      const parsed = JSON.parse(written) as {
+        groups: Array<{ folder: string }>;
+      };
+      expect(parsed.groups).toHaveLength(1);
+      expect(parsed.groups[0]?.folder).toBe('home');
+    });
+
+    it('skips when requestId is missing', async () => {
+      const deps = makeDeps({});
+      await processTaskIpc(
+        { type: 'list_groups' },
+        'admin',
+        true,
+        new Map(),
+        deps,
+      );
+      expect(fs.writeFileSync).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('delete_group', () => {
+    it('deletes a non-main group from main group', async () => {
+      const existing = {
+        'mm:main': makeGroup({
+          jid: 'mm:main',
+          folder: 'admin',
+          isMain: true,
+        }),
+        'tg:123': makeGroup({
+          jid: 'tg:123',
+          folder: 'home',
+          name: 'Home',
+        }),
+      };
+      const deps = makeDeps(existing);
+      await processTaskIpc(
+        { type: 'delete_group', folder: 'home' },
+        'admin',
+        true,
+        new Map(),
+        deps,
+      );
+      expect(deleteRegisteredGroup).toHaveBeenCalledWith('tg:123');
+      expect(deps.deleted).toHaveLength(1);
+      expect(deps.deleted[0]).toEqual({ folder: 'home', jid: 'tg:123' });
+    });
+
+    it('blocks deletion from non-main group', async () => {
+      const existing = {
+        'tg:123': makeGroup({ jid: 'tg:123', folder: 'home' }),
+      };
+      const deps = makeDeps(existing);
+      await processTaskIpc(
+        { type: 'delete_group', folder: 'home' },
+        'home',
+        false,
+        new Map(),
+        deps,
+      );
+      expect(deleteRegisteredGroup).not.toHaveBeenCalled();
+    });
+
+    it('blocks deletion of the main group', async () => {
+      const existing = {
+        'mm:main': makeGroup({
+          jid: 'mm:main',
+          folder: 'admin',
+          isMain: true,
+        }),
+      };
+      const deps = makeDeps(existing);
+      await processTaskIpc(
+        { type: 'delete_group', folder: 'admin' },
+        'admin',
+        true,
+        new Map(),
+        deps,
+      );
+      expect(deleteRegisteredGroup).not.toHaveBeenCalled();
+    });
+
+    it('ignores deletion of unknown folder', async () => {
+      const deps = makeDeps({});
+      await processTaskIpc(
+        { type: 'delete_group', folder: 'nonexistent' },
+        'admin',
+        true,
+        new Map(),
+        deps,
+      );
+      expect(deleteRegisteredGroup).not.toHaveBeenCalled();
     });
   });
 });

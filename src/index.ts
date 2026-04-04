@@ -10,6 +10,7 @@ import {
 } from './channels/registry.js';
 import {
   stopAllContainers,
+  stopGroupContainer,
   runAgentSession,
   warmUpContainers,
   startIdleChecker,
@@ -434,11 +435,24 @@ async function main(): Promise<void> {
         ),
       );
     },
-    onGroupUpdated: (config) => {
+    onGroupUpdated: (config, oldJid) => {
+      if (oldJid) {
+        delete registeredGroups[oldJid];
+      }
       registeredGroups[config.jid] = config;
       logger.info(
         { jid: config.jid, name: config.name },
         'Group updated at runtime',
+      );
+    },
+    onGroupDeleted: (folder, jid) => {
+      delete registeredGroups[jid];
+      logger.info({ folder, jid }, 'Group deleted at runtime');
+      stopGroupContainer(folder).catch((err) =>
+        logger.warn(
+          { folder, err },
+          'Failed to stop container for deleted group',
+        ),
       );
     },
   });

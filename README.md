@@ -262,8 +262,10 @@ Always present — hardcoded in `agent/src/index.ts` via `createOpencodeServer()
 | `cancel_task` / `pause_task` / `resume_task` | Manage scheduled tasks                        | Own group only (unless main) |
 | `list_tasks`                                 | List scheduled tasks (main sees all)          | —                            |
 | `update_task`                                | Update an existing task's config              | Own group only (unless main) |
+| `list_groups`                                | List registered groups (main sees all)        | —                            |
 | `register_group`                             | Register a new channel/group                  | Main group only              |
-| `update_group`                               | Update group config (trigger, model, etc.)    | Main group only              |
+| `update_group`                               | Update group config (trigger, model, JID)     | Main group only              |
+| `delete_group`                               | Delete a group and stop its container         | Main group only              |
 
 ### Custom MCP Servers
 

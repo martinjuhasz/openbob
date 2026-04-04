@@ -8,11 +8,14 @@ import { CronExpressionParser } from 'cron-parser';
 
 import { channelFromJid, GROUPS_DIR, POLL_INTERVAL } from './config.js';
 import {
+  deleteRegisteredGroup,
   deleteTask,
   getActiveTasks,
+  getAllRegisteredGroups,
   getAllTasks,
   getTaskById,
   getTasksForGroup,
+  migrateGroupJid,
   setRegisteredGroup,
   updateTask,
   upsertTask,
@@ -31,7 +34,8 @@ export interface IpcDeps {
   registeredGroups: () => Record<string, GroupConfig>;
   onTasksChanged: () => void;
   onGroupRegistered: (config: GroupConfig) => void;
-  onGroupUpdated: (config: GroupConfig) => void;
+  onGroupUpdated: (config: GroupConfig, oldJid?: string) => void;
+  onGroupDeleted: (folder: string, jid: string) => void;
 }
 
 let ipcWatcherRunning = false;
@@ -449,6 +453,34 @@ export async function processTaskIpc(
       break;
     }
 
+    case 'list_groups': {
+      if (!data.requestId) break;
+      const allGroups = getAllRegisteredGroups();
+      const groupList = Object.values(allGroups)
+        .filter((g) => isMain || g.folder === sourceGroup)
+        .map((g) => ({
+          jid: g.jid,
+          name: g.name,
+          folder: g.folder,
+          trigger: g.trigger,
+          channel: g.channel,
+          is_main: g.isMain,
+          always_respond: g.alwaysRespond,
+          model: g.model ?? null,
+        }));
+      const responseDir = path.join(GROUPS_DIR, sourceGroup, 'ipc', 'input');
+      fs.mkdirSync(responseDir, { recursive: true });
+      const responsePath = path.join(responseDir, `${data.requestId}.json`);
+      const tempPath = `${responsePath}.tmp`;
+      fs.writeFileSync(tempPath, JSON.stringify({ groups: groupList }));
+      fs.renameSync(tempPath, responsePath);
+      logger.debug(
+        { sourceGroup, requestId: data.requestId, count: groupList.length },
+        'list_groups response written',
+      );
+      break;
+    }
+
     case 'update_task': {
       if (!data.taskId) break;
       const task = getTaskById(data.taskId);
@@ -582,6 +614,42 @@ export async function processTaskIpc(
       break;
     }
 
+    case 'delete_group': {
+      if (!isMain) {
+        logger.warn(
+          { sourceGroup },
+          'delete_group: only main group is allowed',
+        );
+        break;
+      }
+      if (!data.folder) {
+        logger.warn({ sourceGroup }, 'delete_group: missing folder');
+        break;
+      }
+      const existing = deps.registeredGroups();
+      const group = Object.values(existing).find(
+        (g) => g.folder === data.folder,
+      );
+      if (!group) {
+        logger.warn({ folder: data.folder }, 'delete_group: group not found');
+        break;
+      }
+      if (group.isMain) {
+        logger.warn(
+          { folder: data.folder },
+          'delete_group: cannot delete the main group',
+        );
+        break;
+      }
+      deleteRegisteredGroup(group.jid);
+      deps.onGroupDeleted(group.folder, group.jid);
+      logger.info(
+        { jid: group.jid, name: group.name, folder: group.folder },
+        'Group deleted via IPC',
+      );
+      break;
+    }
+
     case 'update_group': {
       if (!isMain) {
         logger.warn(
@@ -590,18 +658,51 @@ export async function processTaskIpc(
         );
         break;
       }
-      if (!data.jid) {
-        logger.warn({ sourceGroup }, 'update_group: missing jid');
+      if (!data.folder) {
+        logger.warn({ sourceGroup }, 'update_group: missing folder');
         break;
       }
       const existing = deps.registeredGroups();
-      const group = existing[data.jid];
+      const group = Object.values(existing).find(
+        (g) => g.folder === data.folder,
+      );
       if (!group) {
-        logger.warn({ jid: data.jid }, 'update_group: group not found');
+        logger.warn({ folder: data.folder }, 'update_group: group not found');
         break;
       }
+
+      // Handle JID migration if a new jid is provided
+      let oldJid: string | undefined;
+      if (data.jid && data.jid !== group.jid) {
+        // Check the new jid isn't already taken
+        if (existing[data.jid]) {
+          logger.warn(
+            { newJid: data.jid },
+            'update_group: new jid already in use',
+          );
+          break;
+        }
+        const migrated = migrateGroupJid(group.jid, data.jid);
+        if (!migrated) {
+          logger.warn(
+            { oldJid: group.jid, newJid: data.jid },
+            'update_group: jid migration failed',
+          );
+          break;
+        }
+        oldJid = group.jid;
+        logger.info(
+          { oldJid: group.jid, newJid: data.jid },
+          'Group JID migrated via IPC',
+        );
+      }
+
       const updated: GroupConfig = {
         ...group,
+        ...(data.jid !== undefined && {
+          jid: data.jid,
+          channel: channelFromJid(data.jid),
+        }),
         ...(data.name !== undefined && { name: data.name }),
         ...(data.trigger !== undefined && { trigger: data.trigger }),
         ...(data.alwaysRespond !== undefined && {
@@ -610,12 +711,19 @@ export async function processTaskIpc(
         ...(data.isMain !== undefined && { isMain: data.isMain }),
         ...(data.model !== undefined && { model: data.model }),
       };
-      setRegisteredGroup(updated);
-      deps.onGroupUpdated(updated);
+      // Only call setRegisteredGroup for non-jid changes (jid was already migrated above)
+      if (!oldJid) {
+        setRegisteredGroup(updated);
+      } else {
+        // After migration the jid is already updated in DB; apply other field changes
+        setRegisteredGroup(updated);
+      }
+      deps.onGroupUpdated(updated, oldJid);
       logger.info(
         {
-          jid: data.jid,
+          folder: data.folder,
           changes: {
+            jid: data.jid,
             name: data.name,
             trigger: data.trigger,
             alwaysRespond: data.alwaysRespond,
