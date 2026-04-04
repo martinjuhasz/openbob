@@ -150,6 +150,19 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   const model = group.model ?? getEnv().MODEL;
   const sessionId = getSession(group.folder) ?? undefined;
 
+  // Repeat typing indicator every 4s (Telegram expires after ~5s).
+  // The AbortController ensures cleanup on every exit path via finally.
+  const typingAc = new AbortController();
+  const typingInterval = channel.sendTyping
+    ? setInterval(() => {
+        if (typingAc.signal.aborted) return;
+        channel.sendTyping!(chatJid).catch(() => {});
+      }, 4_000)
+    : undefined;
+  typingAc.signal.addEventListener('abort', () =>
+    clearInterval(typingInterval),
+  );
+
   try {
     const output = await runAgentSession({
       prompt,
@@ -204,6 +217,8 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       previousCursor,
       `⚠️ Interner Fehler. Bitte nochmal versuchen.`,
     );
+  } finally {
+    typingAc.abort();
   }
 }
 
