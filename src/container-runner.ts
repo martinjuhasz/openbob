@@ -783,14 +783,12 @@ export async function runAgentSession(
         break;
       }
       if (statusType === undefined) {
-        // Session not in status map — either not started yet or already finished
+        // Session not in status map — either not started yet or already finished.
+        // OpenCode removes sessions from the status map shortly after completion,
+        // so "missing" after a few polls is the normal completion path when we
+        // miss the brief "idle" window.
         missingFromStatusCount++;
         if (missingFromStatusCount >= 3) {
-          // Session never appeared in status — assume it finished or was lost
-          logger.warn(
-            { groupFolder, sessionId },
-            'Session missing from status map — assuming finished',
-          );
           pollExitReason = 'missing';
           break;
         }
@@ -806,8 +804,10 @@ export async function runAgentSession(
     });
     const messages = messagesRes.data ?? [];
 
-    // On timeout or unexpected exit, log message details for debugging
-    if (pollExitReason !== 'idle') {
+    // On timeout, log message details for debugging.
+    // "missing" is a normal race: session completed and left the status map
+    // before we polled "idle", so only warn on actual timeout.
+    if (pollExitReason === 'timeout') {
       logger.warn(
         {
           groupFolder,
@@ -816,7 +816,7 @@ export async function runAgentSession(
           messageCount: messages.length,
           messages: summarizeMessages(messages),
         },
-        'Session poll ended abnormally — dumping message details',
+        'Session poll timed out — dumping message details',
       );
     }
 
