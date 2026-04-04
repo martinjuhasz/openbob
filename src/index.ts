@@ -1,4 +1,4 @@
-// yetaclaw Host — Entry Point
+// openbob Host — Entry Point
 // Startup sequence: DB → CredentialProxy → IpcWatcher → TaskScheduler → Channels → Router
 
 import { ASSISTANT_NAME, POLL_INTERVAL, channelFromJid } from './config.js';
@@ -229,7 +229,7 @@ async function startMessageLoop(): Promise<void> {
   }
   messageLoopRunning = true;
 
-  logger.info(`yetaclaw running (trigger: @${ASSISTANT_NAME})`);
+  logger.info(`openbob running (trigger: @${ASSISTANT_NAME})`);
 
   while (true) {
     try {
@@ -502,7 +502,7 @@ const isDirectRun =
 
 if (isDirectRun) {
   main().catch((err) => {
-    logger.error({ err }, 'Failed to start yetaclaw');
+    logger.error({ err }, 'Failed to start openbob');
     process.exit(1);
   });
 }

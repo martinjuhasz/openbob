@@ -1,4 +1,4 @@
-# yetaclaw OpenViking Container
+# openbob OpenViking Container
 # Provides memory storage and retrieval for agents
 FROM python:3.11-slim
 

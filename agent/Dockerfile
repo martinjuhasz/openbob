@@ -1,4 +1,4 @@
-# yetaclaw Agent Container
+# openbob Agent Container
 # Runs OpenCode SDK in isolated container, one per active session
 FROM node:22-slim
 

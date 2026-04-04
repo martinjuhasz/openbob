@@ -2,7 +2,7 @@
 
 ## Project
 
-yetaclaw — personal AI assistant running agents in isolated Docker containers. Two-layer architecture: **Host** (Node.js orchestrator in `src/`) and **Agent** (OpenCode server per group in `agent/`).
+openbob — personal AI assistant running agents in isolated Docker containers. Two-layer architecture: **Host** (Node.js orchestrator in `src/`) and **Agent** (OpenCode server per group in `agent/`).
 
 ## Tech Stack
 
@@ -71,6 +71,6 @@ Agents write JSON files to `/workspace/ipc/tasks/` or `/workspace/ipc/messages/`
 - Environment validation via zod schema in `env.ts` — all env vars typed
 - Per-group model override via `model` column on `registered_groups` table (nullable)
 - Channel adapters self-register in `channels/registry.ts`
-- Agent container names: `yetaclaw-agent-<groupFolder>`
+- Agent container names: `openbob-agent-<groupFolder>`
 - Two-tier config: host writes base `opencode.json` (read-only), agent can override in `project/opencode.json`
 - `context.json` at `/workspace/context.json` — updated by host via `fs.writeFileSync` (same inode, visible through Docker file bind mount)

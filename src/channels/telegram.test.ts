@@ -105,7 +105,7 @@ vi.mock('./registry.js', () => ({
 
 // Mock config
 vi.mock('../config.js', () => ({
-  ASSISTANT_NAME: 'yetaclaw',
+  ASSISTANT_NAME: 'openbob',
   GROUPS_DIR: '/test-data/groups',
 }));
 
@@ -435,7 +435,7 @@ describe('TelegramChannel', () => {
           jid: 'tg:999',
           folder: 'test',
           name: 'Test',
-          trigger: 'yetaclaw',
+          trigger: 'openbob',
           channel: 'telegram',
           isMain: false,
           alwaysRespond: false,
@@ -526,7 +526,7 @@ describe('TelegramChannel', () => {
           jid: 'tg:999',
           folder: 'test',
           name: 'Test',
-          trigger: 'yetaclaw',
+          trigger: 'openbob',
           channel: 'telegram',
           isMain: false,
           alwaysRespond: false,
@@ -560,7 +560,7 @@ describe('TelegramChannel', () => {
       });
 
       const storedContent = onMessage.mock.calls[0]?.[1]?.content as string;
-      expect(storedContent).toMatch(/^@yetaclaw /);
+      expect(storedContent).toMatch(/^@openbob /);
     });
 
     it('skips /chatid and /ping bot commands', async () => {
@@ -573,7 +573,7 @@ describe('TelegramChannel', () => {
             jid: 'tg:999',
             folder: 'test',
             name: 'Test',
-            trigger: 'yetaclaw',
+            trigger: 'openbob',
             channel: 'telegram',
             isMain: false,
             alwaysRespond: false,
@@ -628,7 +628,7 @@ describe('TelegramChannel', () => {
             jid: 'tg:999',
             folder: 'test',
             name: 'Test',
-            trigger: 'yetaclaw',
+            trigger: 'openbob',
             channel: 'telegram',
             isMain: false,
             alwaysRespond: false,
@@ -669,7 +669,7 @@ describe('TelegramChannel', () => {
             jid: 'tg:42',
             folder: 'dm',
             name: 'DM',
-            trigger: 'yetaclaw',
+            trigger: 'openbob',
             channel: 'telegram',
             isMain: false,
             alwaysRespond: true,
@@ -730,7 +730,7 @@ describe('TelegramChannel', () => {
       jid: 'tg:999',
       folder: 'test',
       name: 'Test',
-      trigger: 'yetaclaw',
+      trigger: 'openbob',
       channel: 'telegram',
       isMain: false,
       alwaysRespond: false,
@@ -866,7 +866,7 @@ describe('TelegramChannel', () => {
       jid: 'tg:999',
       folder: 'test',
       name: 'Test',
-      trigger: 'yetaclaw',
+      trigger: 'openbob',
       channel: 'telegram',
       isMain: false,
       alwaysRespond: false,
@@ -1094,7 +1094,7 @@ describe('TelegramChannel', () => {
       jid: 'tg:999',
       folder: 'test',
       name: 'Test',
-      trigger: 'yetaclaw',
+      trigger: 'openbob',
       channel: 'telegram',
       isMain: false,
       alwaysRespond: false,

@@ -1,4 +1,4 @@
-# yetaclaw Host Container
+# openbob Host Container
 # Stage 1: Build TypeScript
 FROM node:22-slim AS builder
 WORKDIR /app

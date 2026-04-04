@@ -7,9 +7,9 @@ export const DATA_DIR = process.env['DATA_DIR'] ?? '/data';
 export const GROUPS_DIR = path.join(DATA_DIR, 'groups');
 export const SKILLS_DIR = process.env['SKILLS_DIR'] ?? '/skills';
 export const POLL_INTERVAL = 2000; // ms
-export const ASSISTANT_NAME = process.env['ASSISTANT_NAME'] ?? 'yetaclaw';
+export const ASSISTANT_NAME = process.env['ASSISTANT_NAME'] ?? 'openbob';
 
-export const DB_PATH = path.join(DATA_DIR, 'yetaclaw.db');
+export const DB_PATH = path.join(DATA_DIR, 'openbob.db');
 
 /** Derive full channel name from a JID prefix (e.g. `tg:123` → `'telegram'`). */
 export function channelFromJid(jid: string): string {

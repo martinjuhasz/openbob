@@ -4,11 +4,11 @@ import Database from 'better-sqlite3';
 // Patch DB_PATH before importing db module — use in-memory via tmp file trick
 // We override the initDatabase to use :memory: for tests
 vi.mock('./config.js', () => ({
-  DATA_DIR: '/tmp/yetaclaw-test',
-  GROUPS_DIR: '/tmp/yetaclaw-groups',
+  DATA_DIR: '/tmp/openbob-test',
+  GROUPS_DIR: '/tmp/openbob-groups',
   DB_PATH: ':memory:',
   POLL_INTERVAL: 2000,
-  ASSISTANT_NAME: 'yetaclaw',
+  ASSISTANT_NAME: 'openbob',
 }));
 
 // We can't use :memory: via the path directly in better-sqlite3 with our module,

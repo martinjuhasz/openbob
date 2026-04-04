@@ -1,7 +1,7 @@
 {
-  "name": "yetaclaw",
+  "name": "openbob",
   "version": "0.1.0",
-  "description": "yet another claw — Personal AI assistant using OpenCode as agent runner.",
+  "description": "openbob — Personal AI assistant using OpenCode as agent runner.",
   "type": "module",
   "main": "dist/index.js",
   "scripts": {

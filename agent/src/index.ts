@@ -1,4 +1,4 @@
-// yetaclaw Agent Container — starts OpenCode as a server
+// openbob Agent Container — starts OpenCode as a server
 // Host process connects via HTTP at port 4096
 
 import { createOpencodeServer } from '@opencode-ai/sdk';
@@ -30,7 +30,7 @@ try {
           }
         : {}),
       mcp: {
-        yetaclaw: {
+        openbob: {
           type: 'local',
           command: ['node', mcpServerPath],
         },

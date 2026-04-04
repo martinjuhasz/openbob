@@ -132,7 +132,7 @@ describe('container-runner', () => {
           'ps',
           '-aq',
           '--filter',
-          'label=yetaclaw.group',
+          'label=openbob.group',
         ]),
       );
       // Second call: docker rm
@@ -240,7 +240,7 @@ describe('container-runner', () => {
       );
       expect(runCall).toBeDefined();
       expect(runCall![1]).toContain('--name');
-      expect(runCall![1]).toContain('yetaclaw-agent-test-group');
+      expect(runCall![1]).toContain('openbob-agent-test-group');
 
       vi.unstubAllGlobals();
     });
@@ -772,11 +772,11 @@ describe('container-runner', () => {
 
       // Container name
       const nameIdx = args.indexOf('--name');
-      expect(args[nameIdx + 1]).toBe('yetaclaw-agent-my-group');
+      expect(args[nameIdx + 1]).toBe('openbob-agent-my-group');
 
       // Label
       const labelIdx = args.indexOf('--label');
-      expect(args[labelIdx + 1]).toBe('yetaclaw.group=my-group');
+      expect(args[labelIdx + 1]).toBe('openbob.group=my-group');
 
       // GROUP_FOLDER env
       const eFlags: string[] = [];

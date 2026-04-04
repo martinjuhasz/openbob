@@ -1,10 +1,10 @@
-# yetaclaw
+# openbob
 
-**yet another claw** — A personal AI assistant that runs agents in isolated Docker containers. Loosely based on [NanoClaw](https://github.com/qwibitai/nanoclaw), but built on [OpenCode](https://opencode.ai) instead of Claude Code, supporting 75+ LLM providers, and with optional [OpenViking](https://github.com/open-viking/open-viking) semantic memory.
+**openbob** — A personal AI assistant that runs agents in isolated Docker containers. Loosely based on [NanoClaw](https://github.com/qwibitai/nanoclaw), but built on [OpenCode](https://opencode.ai) instead of Claude Code, supporting 75+ LLM providers, and with optional [OpenViking](https://github.com/open-viking/open-viking) semantic memory.
 
 ## What It Does
 
-yetaclaw connects to your messaging platform, watches for a trigger word, and routes messages to an AI agent running in its own isolated Docker container. Each group/channel gets a dedicated agent with its own workspace, session history, and filesystem — fully sandboxed from the host and other groups.
+openbob connects to your messaging platform, watches for a trigger word, and routes messages to an AI agent running in its own isolated Docker container. Each group/channel gets a dedicated agent with its own workspace, session history, and filesystem — fully sandboxed from the host and other groups.
 
 ```
 Telegram / Mattermost (or other channel)
@@ -43,8 +43,8 @@ Response back via IPC -> Host -> Channel
 ### Setup
 
 ```bash
-git clone https://github.com/your-username/yetaclaw.git
-cd yetaclaw
+git clone https://github.com/your-username/openbob.git
+cd openbob
 cp .env.example .env
 ```
 
@@ -52,7 +52,7 @@ Edit `.env` with your configuration:
 
 ```bash
 # Absolute path on the host machine for persistent data
-DATA_PATH=/opt/yetaclaw/data
+DATA_PATH=/opt/openbob/data
 
 # LLM model — format: providerID/modelID
 MODEL=anthropic/claude-sonnet-4-6
@@ -69,11 +69,11 @@ MATTERMOST_TOKEN=your-bot-token
 
 ### Initial Channel Setup
 
-On first run, yetaclaw needs at least one registered group to monitor. Set the `INITIAL_GROUP_*` env vars to bootstrap it — the channel type is detected automatically from the JID prefix (`tg:` → Telegram, `mm:` → Mattermost).
+On first run, openbob needs at least one registered group to monitor. Set the `INITIAL_GROUP_*` env vars to bootstrap it — the channel type is detected automatically from the JID prefix (`tg:` → Telegram, `mm:` → Mattermost).
 
 **Step 1: Get your Chat ID**
 
-Start yetaclaw with the channel credentials set (e.g. `TELEGRAM_BOT_TOKEN`). Then:
+Start openbob with the channel credentials set (e.g. `TELEGRAM_BOT_TOKEN`). Then:
 
 - **Telegram**: Send `/chatid` to your bot in the target chat. It replies with the JID, e.g. `tg:-1001234567890`.
 - **Mattermost**: The channel ID is visible in the channel URL or via the Mattermost API. Prefix it: `mm:your-channel-id`.
@@ -85,11 +85,11 @@ Add to your `.env`:
 ```bash
 # Telegram example
 INITIAL_GROUP_JID=tg:-1001234567890
-INITIAL_GROUP_TRIGGER=yetaclaw
+INITIAL_GROUP_TRIGGER=openbob
 
 # Mattermost example
 # INITIAL_GROUP_JID=mm:your-channel-id
-# INITIAL_GROUP_TRIGGER=yetaclaw
+# INITIAL_GROUP_TRIGGER=openbob
 ```
 
 Optional overrides (sensible defaults are applied):
@@ -128,7 +128,7 @@ docker compose --profile memory up -d
 In your configured channel, mention the trigger word:
 
 ```
-@yetaclaw hello, what can you do?
+@openbob hello, what can you do?
 ```
 
 The agent will spin up a container, process the message, and respond in the channel.
@@ -208,19 +208,19 @@ Same mechanism applies to `AGENTS.md` — both levels are concatenated, so the a
 
 ### Docker Network
 
-All containers share the `yetaclaw` Docker network. The host reaches agent containers by name (`yetaclaw-agent-<group>`), no published ports needed.
+All containers share the `openbob` Docker network. The host reaches agent containers by name (`openbob-agent-<group>`), no published ports needed.
 
 ```
 ┌─────────────────────────────────────────────┐
-│ Docker network: yetaclaw                    │
+│ Docker network: openbob                     │
 │                                             │
-│  yetaclaw-host ──HTTP──> yetaclaw-agent-*   │
+│  openbob-host ──HTTP──> openbob-agent-*     │
 │       │                       │             │
 │       │                  OpenCode :4096     │
 │       │                       │             │
 │       └──IPC (filesystem)─────┘             │
 │                                             │
-│  yetaclaw-openviking (optional, :1933)      │
+│  openbob-openviking (optional, :1933)       │
 └─────────────────────────────────────────────┘
 ```
 
@@ -251,7 +251,7 @@ Groups can use different models. Set the `model` field when registering a group 
 
 Agents get MCP tools from two sources:
 
-### Built-in: `yetaclaw` Server
+### Built-in: `openbob` Server
 
 Always present — hardcoded in `agent/src/index.ts` via `createOpencodeServer()`. Provides IPC tools for messaging, task scheduling, and group management. This server runs as a stdio child process inside each agent container.
 
@@ -329,7 +329,7 @@ docker compose build
 ### Project Structure
 
 ```
-yetaclaw/
+openbob/
 ├── src/                    # Host application
 │   ├── channels/           # Channel adapters (Telegram, Mattermost, ...)
 │   ├── index.ts            # Orchestrator main loop
@@ -355,7 +355,7 @@ yetaclaw/
 
 ## Credits
 
-Loosely based on [NanoClaw](https://github.com/qwibitai/nanoclaw) by [Qwibit AI](https://github.com/qwibitai). yetaclaw replaces the Claude Code agent runner with [OpenCode](https://opencode.ai) and adds optional [OpenViking](https://github.com/open-viking/open-viking) semantic memory, making it provider-agnostic and independently extensible.
+Loosely based on [NanoClaw](https://github.com/qwibitai/nanoclaw) by [Qwibit AI](https://github.com/qwibitai). openbob replaces the Claude Code agent runner with [OpenCode](https://opencode.ai) and adds optional [OpenViking](https://github.com/open-viking/open-viking) semantic memory, making it provider-agnostic and independently extensible.
 
 ## License
 

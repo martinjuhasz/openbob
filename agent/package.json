@@ -1,8 +1,8 @@
 {
-  "name": "yetaclaw-agent",
+  "name": "openbob-agent",
   "version": "0.1.0",
   "type": "module",
-  "description": "yetaclaw agent runner — runs inside container, uses OpenCode SDK",
+  "description": "openbob agent runner — runs inside container, uses OpenCode SDK",
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc",

@@ -1,10 +1,10 @@
 services:
-  yetaclaw-host:
+  openbob-host:
     build:
       context: .
       dockerfile: Dockerfile
-    image: yetaclaw-host:latest
-    container_name: yetaclaw-host
+    image: openbob-host:latest
+    container_name: openbob-host
     restart: unless-stopped
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock # Spawn agent containers
@@ -25,41 +25,41 @@ services:
       # Paths inside container
       - DATA_DIR=/data
       # Docker
-      - DOCKER_NETWORK=yetaclaw
-      - AGENT_IMAGE=yetaclaw-agent:latest
+      - DOCKER_NETWORK=openbob
+      - AGENT_IMAGE=openbob-agent:latest
       # DATA_PATH passed through so agent spawner knows the absolute host path
       - DATA_PATH=${DATA_PATH}
       # Initial group registration (first run — leave empty to skip)
       - INITIAL_GROUP_JID=${INITIAL_GROUP_JID:-}
       - INITIAL_GROUP_FOLDER=${INITIAL_GROUP_FOLDER:-main}
-      - INITIAL_GROUP_TRIGGER=${INITIAL_GROUP_TRIGGER:-yetaclaw}
+      - INITIAL_GROUP_TRIGGER=${INITIAL_GROUP_TRIGGER:-openbob}
       - INITIAL_GROUP_IS_MAIN=${INITIAL_GROUP_IS_MAIN:-true}
       # OpenViking memory — only active when profile=memory
       - OPENVIKING_URL=${OPENVIKING_URL:-}
-      - OPENVIKING_API_KEY=${OPENVIKING_API_KEY:-yetaclaw-local}
+      - OPENVIKING_API_KEY=${OPENVIKING_API_KEY:-openbob-local}
       # Optional
       - LOG_LEVEL=${LOG_LEVEL:-info}
     networks:
-      - yetaclaw
+      - openbob
 
   # Agent image — built by `docker compose build`, spawned on-demand by host via Docker socket
   # deploy.replicas=0 prevents it from starting as a container on `compose up`
-  yetaclaw-agent:
+  openbob-agent:
     build:
       context: ./agent
       dockerfile: Dockerfile
-    image: yetaclaw-agent:latest
+    image: openbob-agent:latest
     deploy:
       replicas: 0
     networks:
-      - yetaclaw
+      - openbob
 
   openviking:
     build:
       context: ./openviking
       dockerfile: Dockerfile
-    image: yetaclaw-openviking:latest
-    container_name: yetaclaw-openviking
+    image: openbob-openviking:latest
+    container_name: openbob-openviking
     restart: unless-stopped
     ports:
       - '1933:1933' # API
@@ -72,13 +72,13 @@ services:
       - OPENVIKING_EMBEDDING_MODEL=${OPENVIKING_EMBEDDING_MODEL:-openai/text-embedding-3-small}
       - OPENVIKING_EMBEDDING_API_BASE=${OPENVIKING_EMBEDDING_API_BASE:-https://openrouter.ai/api/v1}
       - OPENVIKING_EMBEDDING_DIMENSION=${OPENVIKING_EMBEDDING_DIMENSION:-1536}
-      - OPENVIKING_API_KEY=${OPENVIKING_API_KEY:-yetaclaw-local}
+      - OPENVIKING_API_KEY=${OPENVIKING_API_KEY:-openbob-local}
       - OPENVIKING_CONSOLE=${OPENVIKING_CONSOLE:-1}
     networks:
-      - yetaclaw
+      - openbob
     profiles:
       - memory
 
 networks:
-  yetaclaw:
-    name: yetaclaw
+  openbob:
+    name: openbob

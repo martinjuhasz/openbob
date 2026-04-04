@@ -1,5 +1,5 @@
 /**
- * Stdio MCP Server for yetaclaw
+ * Stdio MCP Server for openbob
  * Runs as child process inside agent container, provides IPC tools.
  * Context is read from /workspace/context.json (written by host, mounted ro).
  */
@@ -46,7 +46,7 @@ function writeIpcFile(dir: string, data: object): string {
   return filename;
 }
 
-const server = new McpServer({ name: 'yetaclaw', version: '1.0.0' });
+const server = new McpServer({ name: 'openbob', version: '1.0.0' });
 
 server.tool(
   'send_message',
@@ -568,7 +568,7 @@ Get the channel JID from the user — format: "tg:<chat-id>" for Telegram or "mm
       .describe('Short slug for workspace dir, no spaces, e.g. "homebase"'),
     trigger: z
       .string()
-      .describe('Word users type to address the bot, e.g. "winston"'),
+      .describe('Word users type to address the bot, e.g. "Bob"'),
     always_respond: z
       .boolean()
       .optional()

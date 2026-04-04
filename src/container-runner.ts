@@ -1,4 +1,4 @@
-// Docker container runner — spawns yetaclaw-agent containers
+// Docker container runner — spawns openbob-agent containers
 // Each group gets one agent container running the OpenCode server
 // Host connects via HTTP using the OpenCode SDK client
 
@@ -17,7 +17,7 @@ import { ContainerInput, ContainerOutput } from './types.js';
 const execFileAsync = promisify(execFile);
 
 const DOCKER = 'docker';
-const AGENT_IMAGE = process.env['AGENT_IMAGE'] ?? 'yetaclaw-agent:latest';
+const AGENT_IMAGE = process.env['AGENT_IMAGE'] ?? 'openbob-agent:latest';
 
 /**
  * Summarize session messages for debug logging.
@@ -65,13 +65,13 @@ function summarizeMessages(
     };
   });
 }
-const DOCKER_NETWORK = process.env['DOCKER_NETWORK'] ?? 'yetaclaw';
+const DOCKER_NETWORK = process.env['DOCKER_NETWORK'] ?? 'openbob';
 // DATA_PATH: absolute path on the Docker host (same value used in compose bind mount)
 const DATA_PATH_HOST = process.env['DATA_PATH'] ?? DATA_DIR;
 
 // OpenViking memory integration
 const OV_URL = process.env['OPENVIKING_URL'];
-const OV_ACCOUNT = 'yetaclaw';
+const OV_ACCOUNT = 'openbob';
 const OV_USER = 'default';
 
 // Cache the user key after first read — it never changes at runtime
@@ -142,7 +142,7 @@ let SKILLS_PATH_HOST = process.env['SKILLS_PATH'] ?? '';
 async function resolveHostPaths(): Promise<void> {
   if (WORKSPACE_PATH_HOST && SKILLS_PATH_HOST) return;
   try {
-    const selfName = process.env['HOSTNAME'] ?? 'yetaclaw-host';
+    const selfName = process.env['HOSTNAME'] ?? 'openbob-host';
     const { stdout } = await execFileAsync(DOCKER, [
       'inspect',
       selfName,
@@ -227,7 +227,7 @@ export function startIdleChecker(): void {
 }
 
 function containerName(groupFolder: string): string {
-  return `yetaclaw-agent-${groupFolder}`;
+  return `openbob-agent-${groupFolder}`;
 }
 
 /**
@@ -388,7 +388,7 @@ async function spawnContainer(
       : []),
     // Labels for cleanup
     '--label',
-    `yetaclaw.group=${groupFolder}`,
+    `openbob.group=${groupFolder}`,
     AGENT_IMAGE,
   ];
 
@@ -558,7 +558,7 @@ export async function stopGroupContainer(groupFolder: string): Promise<void> {
 }
 
 /**
- * Kill and remove all yetaclaw agent containers (cleanup on host shutdown).
+ * Kill and remove all openbob agent containers (cleanup on host shutdown).
  */
 export async function stopAllContainers(): Promise<void> {
   const names = [...activeContainers.values()];
@@ -957,7 +957,7 @@ export async function warmUpContainers(
 }
 
 /**
- * Remove all exited yetaclaw agent containers (orphans from previous runs or crashes).
+ * Remove all exited openbob agent containers (orphans from previous runs or crashes).
  */
 export async function cleanupStoppedContainers(): Promise<void> {
   try {
@@ -965,7 +965,7 @@ export async function cleanupStoppedContainers(): Promise<void> {
       'ps',
       '-aq',
       '--filter',
-      'label=yetaclaw.group',
+      'label=openbob.group',
       '--filter',
       'status=exited',
       '--filter',
@@ -991,7 +991,7 @@ export async function cleanupAllAgentContainers(): Promise<void> {
       'ps',
       '-aq',
       '--filter',
-      'label=yetaclaw.group',
+      'label=openbob.group',
     ]);
     const ids = stdout.trim().split('\n').filter(Boolean);
     if (ids.length === 0) return;

@@ -128,23 +128,21 @@ describe('formatOutbound', () => {
 
 describe('checkTrigger', () => {
   it('detects trigger word', () => {
-    expect(checkTrigger([makeMessage('@yetaclaw hello')], 'yetaclaw')).toBe(
-      true,
-    );
+    expect(checkTrigger([makeMessage('@openbob hello')], 'openbob')).toBe(true);
   });
 
   it('detects trigger without @', () => {
     expect(
-      checkTrigger([makeMessage('yetaclaw please do this')], 'yetaclaw'),
+      checkTrigger([makeMessage('openbob please do this')], 'openbob'),
     ).toBe(true);
   });
 
   it('returns false when no trigger', () => {
-    expect(checkTrigger([makeMessage('hello there')], 'yetaclaw')).toBe(false);
+    expect(checkTrigger([makeMessage('hello there')], 'openbob')).toBe(false);
   });
 
   it('is case insensitive', () => {
-    expect(checkTrigger([makeMessage('@YetaClaw hi')], 'yetaclaw')).toBe(true);
+    expect(checkTrigger([makeMessage('@OpenBob hi')], 'openbob')).toBe(true);
   });
 });
 
