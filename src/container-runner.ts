@@ -648,16 +648,26 @@ export async function runAgentSession(
       logger.info({ groupFolder, sessionId }, 'New OpenCode session created');
     }
 
-    // If the session is still busy from a previous interrupted run, wait briefly then abandon
+    // If the session is still busy from a previous interrupted run, abort it
+    // so we can reuse the same session (preserving conversation history).
     {
       const preStatus = await client.session.status().catch(() => null);
       if (preStatus?.data?.[sessionId]?.type === 'busy') {
         logger.warn(
           { groupFolder, sessionId },
-          'Session still busy before prompt — waiting up to 10s',
+          'Session still busy before prompt — aborting',
         );
-        const busyDeadline = Date.now() + 10_000;
-        while (Date.now() < busyDeadline) {
+        await client.session
+          .abort({ path: { id: sessionId } })
+          .catch((err: unknown) =>
+            logger.warn(
+              { groupFolder, sessionId, err },
+              'session.abort failed before prompt',
+            ),
+          );
+        // Wait for the session to become idle after abort
+        const abortDeadline = Date.now() + 10_000;
+        while (Date.now() < abortDeadline) {
           await new Promise((r) => setTimeout(r, 1_000));
           const s = await client.session.status().catch(() => null);
           if (s?.data?.[sessionId]?.type !== 'busy') break;
@@ -666,9 +676,10 @@ export async function runAgentSession(
           (await client.session.status().catch(() => null))?.data?.[sessionId]
             ?.type === 'busy';
         if (stillBusy) {
+          // Fallback: abort didn't work — create new session to avoid being stuck
           logger.warn(
             { groupFolder, sessionId },
-            'Session still busy after wait — creating new session',
+            'Session still busy after abort — creating new session as fallback',
           );
           const newRes = await client.session.create({
             body: { title: `${groupFolder}/${chatJid}` },
@@ -683,7 +694,7 @@ export async function runAgentSession(
           setSession(groupFolder, sessionId);
           logger.info(
             { groupFolder, sessionId },
-            'New session created after stale busy',
+            'New session created after failed abort',
           );
         }
       }
@@ -798,27 +809,32 @@ export async function runAgentSession(
     }
     logger.info({ groupFolder, sessionId, pollExitReason }, 'Poll loop exited');
 
+    // On timeout, abort the session so the agent stops and the session
+    // remains reusable (preserving conversation history).
+    if (pollExitReason === 'timeout') {
+      logger.warn(
+        { groupFolder, sessionId },
+        'Session poll timed out — aborting session',
+      );
+      await client.session
+        .abort({ path: { id: sessionId } })
+        .catch((err: unknown) =>
+          logger.warn({ groupFolder, sessionId, err }, 'session.abort failed'),
+        );
+      // Wait briefly for the session to settle after abort
+      const abortDeadline = Date.now() + 5_000;
+      while (Date.now() < abortDeadline) {
+        await new Promise((r) => setTimeout(r, RESPONSE_POLL_INTERVAL));
+        const s = await client.session.status().catch(() => null);
+        if (s?.data?.[sessionId]?.type !== 'busy') break;
+      }
+    }
+
     // Fetch messages and find last assistant message
     const messagesRes = await client.session.messages({
       path: { id: sessionId },
     });
     const messages = messagesRes.data ?? [];
-
-    // On timeout, log message details for debugging.
-    // "missing" is a normal race: session completed and left the status map
-    // before we polled "idle", so only warn on actual timeout.
-    if (pollExitReason === 'timeout') {
-      logger.warn(
-        {
-          groupFolder,
-          sessionId,
-          pollExitReason,
-          messageCount: messages.length,
-          messages: summarizeMessages(messages),
-        },
-        'Session poll timed out — dumping message details',
-      );
-    }
 
     // Find last assistant message (in reverse)
     const assistantMsg = [...messages]
