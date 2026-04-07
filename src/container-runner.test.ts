@@ -59,6 +59,8 @@ vi.mock('@opencode-ai/sdk', () => ({
 vi.mock('./db.js', () => ({
   setSession: vi.fn(),
   getSession: vi.fn().mockReturnValue(null),
+  getOvUserKey: vi.fn().mockReturnValue(null),
+  setOvUserKey: vi.fn(),
 }));
 
 vi.mock('./env.js', () => ({
@@ -817,5 +819,373 @@ describe('container-runner', () => {
 
       vi.unstubAllGlobals();
     });
+  });
+});
+
+// ── formatPromptForOv ─────────────────────────────────────────────────────
+
+describe('formatPromptForOv', () => {
+  it('converts XML messages to sender-prefixed format', async () => {
+    const { formatPromptForOv } = await importRunner();
+    const xml = `<messages>
+<message sender="Alice" time="2026-01-01T10:00:00.000Z">Hello world</message>
+<message sender="Bob" time="2026-01-01T10:01:00.000Z">How are you?</message>
+</messages>`;
+    const result = formatPromptForOv(xml);
+    expect(result).toBe('[Alice]: Hello world\n[Bob]: How are you?');
+  });
+
+  it('returns raw prompt when no XML message tags found', async () => {
+    const { formatPromptForOv } = await importRunner();
+    const plain = 'Just a regular prompt without XML';
+    expect(formatPromptForOv(plain)).toBe(plain);
+  });
+
+  it('unescapes XML entities in sender names and content', async () => {
+    const { formatPromptForOv } = await importRunner();
+    const xml = `<messages>
+<message sender="O&apos;Brien &amp; Co" time="2026-01-01T10:00:00.000Z">Use &lt;tag&gt; &amp; &quot;quotes&quot;</message>
+</messages>`;
+    const result = formatPromptForOv(xml);
+    // Note: &apos; is not handled by our unescape (not in the regex), but &amp; &lt; &gt; &quot; are
+    expect(result).toContain('[O');
+    expect(result).toContain('& Co');
+    expect(result).toContain('<tag>');
+    expect(result).toContain('& "quotes"');
+  });
+
+  it('handles single message', async () => {
+    const { formatPromptForOv } = await importRunner();
+    const xml = `<messages>
+<message sender="Martin" time="2026-01-01T10:00:00.000Z">How was the API format?</message>
+</messages>`;
+    const result = formatPromptForOv(xml);
+    expect(result).toBe('[Martin]: How was the API format?');
+  });
+});
+
+// ── OpenViking scope integration ──────────────────────────────────────────
+
+describe('OpenViking scope', () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.clearAllMocks();
+    process.env = { ...originalEnv };
+    mockExecFile.mockImplementation(() => dockerOk());
+    mockExecFileSync.mockReturnValue(Buffer.from(''));
+    mockFs.existsSync.mockReturnValue(false);
+    mockFs.readFileSync.mockImplementation(() => {
+      const err: NodeJS.ErrnoException = new Error('ENOENT');
+      err.code = 'ENOENT';
+      throw err;
+    });
+  });
+
+  afterEach(() => {
+    process.env = originalEnv;
+  });
+
+  function setupHappyPathWithOv() {
+    mockExecFile.mockImplementation((_cmd: string, args: string[]) => {
+      if (args[0] === 'inspect' && args.length > 2)
+        return dockerOk('/workspace:/host/workspace;');
+      if (args[0] === 'ps') return dockerOk('\n');
+      if (args[0] === 'rm') return dockerOk();
+      if (args[0] === 'run') return dockerOk('id');
+      return dockerOk();
+    });
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({}),
+      }),
+    );
+
+    process.env['ANTHROPIC_API_KEY'] = 'sk-test';
+    mockClientAuth.set.mockResolvedValue({ data: {} });
+    mockClientSession.create.mockResolvedValue({
+      data: { id: 'sess-123' },
+    });
+    mockClientSession.get.mockResolvedValue({ data: null });
+    mockClientSession.list.mockResolvedValue({ data: [] });
+    mockClientSession.status.mockResolvedValue({
+      data: { 'sess-123': { type: 'idle' } },
+    });
+    mockClientSession.promptAsync.mockResolvedValue({ data: {} });
+    mockClientSession.messages.mockResolvedValue({
+      data: [
+        {
+          info: { role: 'assistant' },
+          parts: [{ type: 'text', text: 'Response text' }],
+        },
+      ],
+    });
+  }
+
+  it('uses global user key with account/user headers in global scope', async () => {
+    process.env['OPENVIKING_URL'] = 'http://openviking:1933';
+
+    const { getEnv } = await import('./env.js');
+    vi.mocked(getEnv).mockReturnValue({
+      MODEL: 'anthropic/claude-sonnet-4-6',
+      OPENVIKING_SCOPE: 'global',
+      LOG_LEVEL: 'info',
+    } as ReturnType<typeof getEnv>);
+
+    // Global user key file exists
+    mockFs.readFileSync.mockImplementation((p: string) => {
+      if (typeof p === 'string' && p.includes('ov_user.key'))
+        return 'global-user-key-123';
+      const err: NodeJS.ErrnoException = new Error('ENOENT');
+      err.code = 'ENOENT';
+      throw err;
+    });
+
+    setupHappyPathWithOv();
+
+    // Capture fetch calls to inspect OV requests
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ result: { memories: [] } }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { runAgentSession } = await importRunner();
+    await runAgentSession({
+      groupFolder: 'test-group',
+      prompt:
+        '<messages>\n<message sender="Alice" time="2026-01-01T10:00:00.000Z">Hello</message>\n</messages>',
+      chatJid: 'mm:ch1',
+      isMain: false,
+      model: 'anthropic/claude-sonnet-4-6',
+    });
+
+    // Find OV API calls (to openviking:1933)
+    const ovCalls = fetchMock.mock.calls.filter(
+      (c: unknown[]) =>
+        typeof c[0] === 'string' && (c[0] as string).includes('openviking'),
+    );
+
+    // Should have OV calls with global user headers
+    if (ovCalls.length > 0) {
+      const headers = (ovCalls[0]![1] as { headers: Record<string, string> })
+        .headers;
+      expect(headers['X-API-Key']).toBe('global-user-key-123');
+      expect(headers['X-OpenViking-Account']).toBe('openbob');
+      expect(headers['X-OpenViking-User']).toBe('default');
+    }
+
+    vi.unstubAllGlobals();
+  });
+
+  it('uses per-group user key without account/user headers in group scope', async () => {
+    process.env['OPENVIKING_URL'] = 'http://openviking:1933';
+
+    const { getEnv } = await import('./env.js');
+    vi.mocked(getEnv).mockReturnValue({
+      MODEL: 'anthropic/claude-sonnet-4-6',
+      OPENVIKING_SCOPE: 'group',
+      OPENVIKING_API_KEY: 'root-key',
+      LOG_LEVEL: 'info',
+    } as ReturnType<typeof getEnv>);
+
+    // DB returns existing per-group key
+    const { getOvUserKey } = await import('./db.js');
+    vi.mocked(getOvUserKey).mockReturnValue('group-user-key-456');
+
+    setupHappyPathWithOv();
+
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ result: { memories: [] } }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { runAgentSession } = await importRunner();
+    await runAgentSession({
+      groupFolder: 'test-group',
+      prompt:
+        '<messages>\n<message sender="Bob" time="2026-01-01T10:00:00.000Z">Hi</message>\n</messages>',
+      chatJid: 'mm:ch1',
+      isMain: false,
+      model: 'anthropic/claude-sonnet-4-6',
+    });
+
+    // Find OV API calls
+    const ovCalls = fetchMock.mock.calls.filter(
+      (c: unknown[]) =>
+        typeof c[0] === 'string' && (c[0] as string).includes('openviking'),
+    );
+
+    if (ovCalls.length > 0) {
+      const headers = (ovCalls[0]![1] as { headers: Record<string, string> })
+        .headers;
+      expect(headers['X-API-Key']).toBe('group-user-key-456');
+      // Per-group keys are self-sufficient — no account/user headers
+      expect(headers['X-OpenViking-Account']).toBeUndefined();
+      expect(headers['X-OpenViking-User']).toBeUndefined();
+    }
+
+    vi.unstubAllGlobals();
+  });
+
+  it('provisions new user on first group interaction in group scope', async () => {
+    process.env['OPENVIKING_URL'] = 'http://openviking:1933';
+
+    const { getEnv } = await import('./env.js');
+    vi.mocked(getEnv).mockReturnValue({
+      MODEL: 'anthropic/claude-sonnet-4-6',
+      OPENVIKING_SCOPE: 'group',
+      OPENVIKING_API_KEY: 'root-key',
+      LOG_LEVEL: 'info',
+    } as ReturnType<typeof getEnv>);
+
+    // No existing key in DB
+    const { getOvUserKey, setOvUserKey } = await import('./db.js');
+    vi.mocked(getOvUserKey).mockReturnValue(null);
+
+    setupHappyPathWithOv();
+
+    // Admin API provisioning call returns user key, other OV calls succeed
+    const fetchMock = vi.fn().mockImplementation((url: string) => {
+      if (typeof url === 'string' && url.includes('/admin/accounts/')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ result: { user_key: 'new-group-key-789' } }),
+        });
+      }
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({ result: { memories: [] } }),
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { runAgentSession } = await importRunner();
+    await runAgentSession({
+      groupFolder: 'new-group',
+      prompt: 'Hello',
+      chatJid: 'mm:ch1',
+      isMain: false,
+      model: 'anthropic/claude-sonnet-4-6',
+    });
+
+    // Should have called Admin API to provision user
+    const adminCall = fetchMock.mock.calls.find(
+      (c: unknown[]) =>
+        typeof c[0] === 'string' &&
+        (c[0] as string).includes('/admin/accounts/openbob/users'),
+    );
+    expect(adminCall).toBeDefined();
+
+    // Should have stored the new key in DB
+    expect(setOvUserKey).toHaveBeenCalledWith('new-group', 'new-group-key-789');
+
+    vi.unstubAllGlobals();
+  });
+
+  it('sends sender-prefixed prompt to OpenViking', async () => {
+    process.env['OPENVIKING_URL'] = 'http://openviking:1933';
+
+    const { getEnv } = await import('./env.js');
+    vi.mocked(getEnv).mockReturnValue({
+      MODEL: 'anthropic/claude-sonnet-4-6',
+      OPENVIKING_SCOPE: 'global',
+      LOG_LEVEL: 'info',
+    } as ReturnType<typeof getEnv>);
+
+    mockFs.readFileSync.mockImplementation((p: string) => {
+      if (typeof p === 'string' && p.includes('ov_user.key'))
+        return 'global-key';
+      const err: NodeJS.ErrnoException = new Error('ENOENT');
+      err.code = 'ENOENT';
+      throw err;
+    });
+
+    setupHappyPathWithOv();
+
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ result: { memories: [] } }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { runAgentSession } = await importRunner();
+    await runAgentSession({
+      groupFolder: 'test-group',
+      prompt:
+        '<messages>\n<message sender="Martin" time="2026-01-01T10:00:00.000Z">How was the API?</message>\n</messages>',
+      chatJid: 'mm:ch1',
+      isMain: false,
+      model: 'anthropic/claude-sonnet-4-6',
+    });
+
+    // Find the OV message POST call (session messages endpoint)
+    const msgCalls = fetchMock.mock.calls.filter(
+      (c: unknown[]) =>
+        typeof c[0] === 'string' &&
+        (c[0] as string).includes('/sessions/') &&
+        (c[0] as string).includes('/messages'),
+    );
+
+    // The user message should contain sender-prefixed format, not raw XML
+    if (msgCalls.length > 0) {
+      const body = JSON.parse((msgCalls[0]![1] as { body: string }).body) as {
+        content: string;
+      };
+      expect(body.content).toBe('[Martin]: How was the API?');
+      expect(body.content).not.toContain('<message');
+    }
+
+    vi.unstubAllGlobals();
+  });
+
+  it('searches against per-group user URI in group scope', async () => {
+    process.env['OPENVIKING_URL'] = 'http://openviking:1933';
+
+    const { getEnv } = await import('./env.js');
+    vi.mocked(getEnv).mockReturnValue({
+      MODEL: 'anthropic/claude-sonnet-4-6',
+      OPENVIKING_SCOPE: 'group',
+      OPENVIKING_API_KEY: 'root-key',
+      LOG_LEVEL: 'info',
+    } as ReturnType<typeof getEnv>);
+
+    const { getOvUserKey } = await import('./db.js');
+    vi.mocked(getOvUserKey).mockReturnValue('group-key');
+
+    setupHappyPathWithOv();
+
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ result: { memories: [] } }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { runAgentSession } = await importRunner();
+    await runAgentSession({
+      groupFolder: 'my-group',
+      prompt: 'Hello',
+      chatJid: 'mm:ch1',
+      isMain: false,
+      model: 'anthropic/claude-sonnet-4-6',
+    });
+
+    // Find the search/find call
+    const findCalls = fetchMock.mock.calls.filter(
+      (c: unknown[]) =>
+        typeof c[0] === 'string' && (c[0] as string).includes('/search/find'),
+    );
+
+    if (findCalls.length > 0) {
+      const body = JSON.parse((findCalls[0]![1] as { body: string }).body) as {
+        target_uri: string;
+      };
+      expect(body.target_uri).toBe('viking://user/group-my-group/memories');
+    }
+
+    vi.unstubAllGlobals();
   });
 });

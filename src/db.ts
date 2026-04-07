@@ -98,6 +98,12 @@ export function initDatabase(): void {
   if (!cols.includes('model')) {
     db.prepare(`ALTER TABLE registered_groups ADD COLUMN model TEXT`).run();
   }
+  // Migration: add ov_user_key column if missing (per-group OpenViking user keys)
+  if (!cols.includes('ov_user_key')) {
+    db.prepare(
+      `ALTER TABLE registered_groups ADD COLUMN ov_user_key TEXT`,
+    ).run();
+  }
   logger.info({ dbPath: DB_PATH }, 'Database initialised');
 }
 
@@ -233,6 +239,21 @@ export function setRegisteredGroup(config: GroupConfig): void {
 
 export function deleteRegisteredGroup(jid: string): void {
   db.prepare(`DELETE FROM registered_groups WHERE jid = ?`).run(jid);
+}
+
+// --- OpenViking per-group user keys ---
+
+export function getOvUserKey(groupFolder: string): string | null {
+  const row = db
+    .prepare(`SELECT ov_user_key FROM registered_groups WHERE folder = ?`)
+    .get(groupFolder) as { ov_user_key: string | null } | undefined;
+  return row?.ov_user_key ?? null;
+}
+
+export function setOvUserKey(groupFolder: string, key: string): void {
+  db.prepare(
+    `UPDATE registered_groups SET ov_user_key = ? WHERE folder = ?`,
+  ).run(key, groupFolder);
 }
 
 export function migrateGroupJid(oldJid: string, newJid: string): boolean {

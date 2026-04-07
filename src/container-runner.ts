@@ -9,7 +9,7 @@ import { createOpencodeClient } from '@opencode-ai/sdk';
 import { promisify } from 'util';
 
 import { DATA_DIR, GROUPS_DIR } from './config.js';
-import { setSession, getSession } from './db.js';
+import { setSession, getSession, getOvUserKey, setOvUserKey } from './db.js';
 import { getEnv } from './env.js';
 import { logger } from './logger.js';
 import { ContainerInput, ContainerOutput } from './types.js';
@@ -74,13 +74,13 @@ const OV_URL = process.env['OPENVIKING_URL'];
 const OV_ACCOUNT = 'openbob';
 const OV_USER = 'default';
 
-// Cache the user key after first read — it never changes at runtime
-let _ovUserKey: string | null | undefined = undefined;
-function readOvUserKey(): string | null {
+// Cache the global user key after first read — it never changes at runtime
+let _ovGlobalUserKey: string | null | undefined = undefined;
+function readOvGlobalUserKey(): string | null {
   if (!OV_URL) return null;
-  if (_ovUserKey !== undefined) return _ovUserKey;
+  if (_ovGlobalUserKey !== undefined) return _ovGlobalUserKey;
   try {
-    _ovUserKey = fs
+    _ovGlobalUserKey = fs
       .readFileSync(path.join(DATA_DIR, 'openviking', 'ov_user.key'), 'utf-8')
       .trim();
   } catch (err) {
@@ -89,16 +89,16 @@ function readOvUserKey(): string | null {
       'code' in err &&
       (err as NodeJS.ErrnoException).code === 'ENOENT'
     ) {
-      _ovUserKey = null;
+      _ovGlobalUserKey = null;
     } else {
       throw err;
     }
   }
-  if (!_ovUserKey)
+  if (!_ovGlobalUserKey)
     logger.warn(
       'OpenViking URL configured but user key not found — memory disabled',
     );
-  return _ovUserKey;
+  return _ovGlobalUserKey;
 }
 
 // Log once at startup whether OpenViking is enabled
@@ -108,19 +108,25 @@ if (OV_URL) {
   logger.info('OpenViking not configured — memory disabled');
 }
 
+/**
+ * Make a request to the OpenViking API.
+ * When using per-group user keys, the key alone is sufficient — the server
+ * derives account_id and user_id from the key. We still send account/user
+ * headers for the global (default) user for backwards compatibility.
+ */
 async function ovRequest(
   userKey: string,
   endpoint: string,
   method: string,
   body?: unknown,
+  headers?: Record<string, string>,
 ): Promise<unknown> {
   const res = await fetch(`${OV_URL}/api/v1${endpoint}`, {
     method,
     headers: {
       'Content-Type': 'application/json',
       'X-API-Key': userKey,
-      'X-OpenViking-Account': OV_ACCOUNT,
-      'X-OpenViking-User': OV_USER,
+      ...headers,
     },
     body: body !== undefined ? JSON.stringify(body) : undefined,
     signal: AbortSignal.timeout(8_000),
@@ -131,6 +137,124 @@ async function ovRequest(
   }
   const json = (await res.json()) as { result?: unknown; status?: string };
   return json.result ?? json;
+}
+
+/**
+ * Provision a per-group OpenViking user via the Admin API.
+ * Returns the new user key, or null if provisioning fails.
+ */
+async function ovProvisionGroupUser(
+  groupFolder: string,
+): Promise<string | null> {
+  const apiKey = getEnv().OPENVIKING_API_KEY;
+  if (!apiKey) {
+    logger.warn('OPENVIKING_API_KEY not set — cannot provision per-group user');
+    return null;
+  }
+  const userId = `group-${groupFolder}`;
+  try {
+    const result = (await ovRequest(
+      apiKey,
+      `/admin/accounts/${OV_ACCOUNT}/users`,
+      'POST',
+      { user_id: userId },
+    )) as { user_key?: string } | null;
+    const userKey = result?.user_key;
+    if (!userKey) {
+      logger.warn(
+        { groupFolder, result },
+        'OpenViking: user provisioning returned no user_key',
+      );
+      return null;
+    }
+    setOvUserKey(groupFolder, userKey);
+    logger.info(
+      { groupFolder, userId },
+      'OpenViking: provisioned per-group user',
+    );
+    return userKey;
+  } catch (err) {
+    logger.warn(
+      { groupFolder, err },
+      'OpenViking: failed to provision per-group user',
+    );
+    return null;
+  }
+}
+
+interface OvCredentials {
+  userKey: string;
+  userId: string;
+  /** Extra headers to include in ovRequest (e.g. account/user for global mode). */
+  headers: Record<string, string>;
+}
+
+/**
+ * Get OpenViking credentials for a group based on OPENVIKING_SCOPE.
+ * - `global`: uses the shared default user (with account/user headers)
+ * - `group`: uses a per-group user key (self-sufficient, lazy-provisioned)
+ */
+async function getOvCredentials(
+  groupFolder: string,
+): Promise<OvCredentials | null> {
+  if (!OV_URL) return null;
+  const scope = getEnv().OPENVIKING_SCOPE;
+
+  if (scope === 'group') {
+    // Check DB for existing per-group key
+    let userKey = getOvUserKey(groupFolder);
+    if (!userKey) {
+      // Provision on first interaction
+      userKey = await ovProvisionGroupUser(groupFolder);
+    }
+    if (!userKey) return null;
+    return {
+      userKey,
+      userId: `group-${groupFolder}`,
+      headers: {},
+    };
+  }
+
+  // Global scope (default): use shared user key + account/user headers
+  const userKey = readOvGlobalUserKey();
+  if (!userKey) return null;
+  return {
+    userKey,
+    userId: OV_USER,
+    headers: {
+      'X-OpenViking-Account': OV_ACCOUNT,
+      'X-OpenViking-User': OV_USER,
+    },
+  };
+}
+
+/**
+ * Transform the XML prompt into a sender-prefixed format for OpenViking.
+ * Input:  `<messages>\n<message sender="Alice" time="...">Hello</message>\n</messages>`
+ * Output: `[Alice]: Hello`
+ *
+ * Falls back to the raw prompt if no XML message tags are found.
+ */
+export function formatPromptForOv(prompt: string): string {
+  const messageRegex =
+    /<message\s+sender="([^"]*)"\s+time="[^"]*">([^<]*)<\/message>/g;
+  const lines: string[] = [];
+  let match;
+  while ((match = messageRegex.exec(prompt)) !== null) {
+    const sender = match[1]!
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"');
+    const content = match[2]!
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"');
+    lines.push(`[${sender}]: ${content}`);
+  }
+  if (lines.length === 0) return prompt;
+  return lines.join('\n');
 }
 
 // WORKSPACE_PATH: actual host path for /workspace inside this container.
@@ -702,22 +826,41 @@ export async function runAgentSession(
 
     // OpenViking: recall relevant memories and inject into system prompt
     let ovSystem: string | undefined;
-    const ovKey = readOvUserKey();
-    if (ovKey) {
+    const ovCreds = await getOvCredentials(groupFolder);
+    const ovPrompt = formatPromptForOv(prompt);
+    if (ovCreds) {
       try {
         const sid = encodeURIComponent(sessionId);
         const [, , recalled] = (await Promise.all([
-          ovRequest(ovKey, `/sessions/${sid}?auto_create=true`, 'GET'),
-          ovRequest(ovKey, `/sessions/${sid}/messages`, 'POST', {
-            role: 'user',
-            content: prompt,
-          }),
-          ovRequest(ovKey, '/search/find', 'POST', {
-            query: prompt,
-            target_uri: `viking://user/${OV_USER}/memories`,
-            limit: 5,
-            score_threshold: 0.1,
-          }),
+          ovRequest(
+            ovCreds.userKey,
+            `/sessions/${sid}?auto_create=true`,
+            'GET',
+            undefined,
+            ovCreds.headers,
+          ),
+          ovRequest(
+            ovCreds.userKey,
+            `/sessions/${sid}/messages`,
+            'POST',
+            {
+              role: 'user',
+              content: ovPrompt,
+            },
+            ovCreds.headers,
+          ),
+          ovRequest(
+            ovCreds.userKey,
+            '/search/find',
+            'POST',
+            {
+              query: ovPrompt,
+              target_uri: `viking://user/${ovCreds.userId}/memories`,
+              limit: 5,
+              score_threshold: 0.1,
+            },
+            ovCreds.headers,
+          ),
         ])) as [
           unknown,
           unknown,
@@ -914,14 +1057,26 @@ export async function runAgentSession(
     );
 
     // OpenViking: store assistant response and commit for memory extraction
-    if (ovKey) {
+    if (ovCreds) {
       try {
         const sid = encodeURIComponent(sessionId);
-        await ovRequest(ovKey, `/sessions/${sid}/messages`, 'POST', {
-          role: 'assistant',
-          content: text,
-        });
-        await ovRequest(ovKey, `/sessions/${sid}/commit`, 'POST', {});
+        await ovRequest(
+          ovCreds.userKey,
+          `/sessions/${sid}/messages`,
+          'POST',
+          {
+            role: 'assistant',
+            content: text,
+          },
+          ovCreds.headers,
+        );
+        await ovRequest(
+          ovCreds.userKey,
+          `/sessions/${sid}/commit`,
+          'POST',
+          {},
+          ovCreds.headers,
+        );
         logger.info(
           { groupFolder },
           'OpenViking: session committed for memory extraction',

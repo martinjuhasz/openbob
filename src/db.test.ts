@@ -251,6 +251,62 @@ describe('registered_groups', () => {
       .get() as { name: string };
     expect(row.name).toBe('NewName');
   });
+
+  describe('ov_user_key', () => {
+    it('stores and retrieves per-group OV user key', () => {
+      db.prepare(
+        `ALTER TABLE registered_groups ADD COLUMN ov_user_key TEXT`,
+      ).run();
+      db.prepare(
+        `INSERT INTO registered_groups (jid,name,folder,trigger,channel,is_main,created_at) VALUES ('mm:ch1','Dev','dev-group','@bot','mattermost',0,1700000000000)`,
+      ).run();
+
+      // Initially null
+      const before = db
+        .prepare(`SELECT ov_user_key FROM registered_groups WHERE folder = ?`)
+        .get('dev-group') as { ov_user_key: string | null };
+      expect(before.ov_user_key).toBeNull();
+
+      // Set key
+      db.prepare(
+        `UPDATE registered_groups SET ov_user_key = ? WHERE folder = ?`,
+      ).run('ov-key-abc', 'dev-group');
+
+      const after = db
+        .prepare(`SELECT ov_user_key FROM registered_groups WHERE folder = ?`)
+        .get('dev-group') as { ov_user_key: string | null };
+      expect(after.ov_user_key).toBe('ov-key-abc');
+    });
+
+    it('returns null for unknown group folder', () => {
+      db.prepare(
+        `ALTER TABLE registered_groups ADD COLUMN ov_user_key TEXT`,
+      ).run();
+
+      const row = db
+        .prepare(`SELECT ov_user_key FROM registered_groups WHERE folder = ?`)
+        .get('nonexistent') as { ov_user_key: string | null } | undefined;
+      expect(row).toBeUndefined();
+    });
+
+    it('overwrites existing key', () => {
+      db.prepare(
+        `ALTER TABLE registered_groups ADD COLUMN ov_user_key TEXT`,
+      ).run();
+      db.prepare(
+        `INSERT INTO registered_groups (jid,name,folder,trigger,channel,is_main,created_at,ov_user_key) VALUES ('mm:ch1','Dev','dev-group','@bot','mattermost',0,1700000000000,'old-key')`,
+      ).run();
+
+      db.prepare(
+        `UPDATE registered_groups SET ov_user_key = ? WHERE folder = ?`,
+      ).run('new-key', 'dev-group');
+
+      const row = db
+        .prepare(`SELECT ov_user_key FROM registered_groups WHERE folder = ?`)
+        .get('dev-group') as { ov_user_key: string | null };
+      expect(row.ov_user_key).toBe('new-key');
+    });
+  });
 });
 
 describe('sessions', () => {

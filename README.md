@@ -1,23 +1,31 @@
 # openbob
 
-**openbob** — A personal AI assistant that runs agents in isolated Docker containers. Loosely based on [NanoClaw](https://github.com/qwibitai/nanoclaw), but built on [OpenCode](https://opencode.ai) instead of Claude Code, supporting 75+ LLM providers, and with optional [OpenViking](https://github.com/open-viking/open-viking) semantic memory.
+**An isolated agent runner for messaging platforms.** Each chat group gets its own sandboxed AI agent in a dedicated Docker container — with [OpenCode](https://opencode.ai) as the agent runtime and [OpenViking](https://github.com/volcengine/OpenViking) as persistent context memory.
 
-## What It Does
+### Why openbob?
 
-openbob connects to your messaging platform, watches for a trigger word, and routes messages to an AI agent running in its own isolated Docker container. Each group/channel gets a dedicated agent with its own workspace, session history, and filesystem — fully sandboxed from the host and other groups.
+Most agent setups share a single process, a single context window, and a single filesystem. openbob takes a different approach:
+
+- **Full container isolation** — Every group/channel gets its own Docker container with a dedicated workspace, session history, and filesystem. Agents can't see or interfere with each other. The host machine stays untouched.
+- **[OpenCode](https://opencode.ai) as agent runtime** — The open-source AI coding agent (140K+ GitHub stars, 75+ LLM providers) runs inside each container as a headless server. It handles the LLM agent loop, tool execution, LSP integration, and session persistence — openbob just orchestrates.
+- **[OpenViking](https://github.com/volcengine/OpenViking) as context memory** _(optional)_ — OpenViking is a context database that replaces flat vector stores with a filesystem paradigm. Agents build up structured, hierarchical memory across sessions — resources, skills, and learnings organized as a virtual filesystem (`viking://`) with tiered loading (L0 abstract → L1 overview → L2 full content). The agent gets smarter with use.
+
+### How It Works
+
+openbob connects to your messaging platform (Telegram, Mattermost), watches for a trigger word, and routes each message to the right agent container:
 
 ```
-Telegram / Mattermost (or other channel)
-        |
-Host (Node.js) — polls messages, routes to groups
-        |
-Docker container (per group) — isolated agent sandbox
-        |
-OpenCode server — LLM agent loop, tools, session persistence
-        |  (optional)
-OpenViking — semantic memory across sessions
-        |
-Response back via IPC -> Host -> Channel
+Messaging platform (Telegram / Mattermost)
+        │
+  Host (Node.js) — polls messages, detects triggers, routes to groups
+        │
+  Docker container (per group) — isolated sandbox, own workspace
+        │
+  OpenCode server — LLM agent loop, tool use, session persistence
+        │  (optional)
+  OpenViking — context database, semantic memory across sessions
+        │
+  Response via IPC → Host → Channel
 ```
 
 ## Features
@@ -355,7 +363,7 @@ openbob/
 
 ## Credits
 
-Loosely based on [NanoClaw](https://github.com/qwibitai/nanoclaw) by [Qwibit AI](https://github.com/qwibitai). openbob replaces the Claude Code agent runner with [OpenCode](https://opencode.ai) and adds optional [OpenViking](https://github.com/open-viking/open-viking) semantic memory, making it provider-agnostic and independently extensible.
+Loosely based on [NanoClaw](https://github.com/qwibitai/nanoclaw) by [Qwibit AI](https://github.com/qwibitai). openbob replaces the Claude Code agent runner with [OpenCode](https://opencode.ai) and adds optional [OpenViking](https://github.com/volcengine/OpenViking) semantic memory, making it provider-agnostic and independently extensible.
 
 ## License
 

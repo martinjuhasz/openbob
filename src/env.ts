@@ -40,6 +40,11 @@ const envSchema = z.object({
 
   // Internal
   OPENVIKING_URL: z.preprocess(emptyToUndefined, z.string().url().optional()),
+  OPENVIKING_API_KEY: z.preprocess(
+    emptyToUndefined,
+    z.string().min(1).optional(),
+  ),
+  OPENVIKING_SCOPE: z.enum(['global', 'group']).default('global'),
   LOG_LEVEL: z
     .enum(['trace', 'debug', 'info', 'warn', 'error'])
     .default('info'),
