@@ -8,6 +8,8 @@
 
 **~5,000 lines of TypeScript. That's the entire thing.** No framework maze, no abstraction layers — just a single Node.js process orchestrating Docker containers. Read it in an afternoon, fork it, make it yours.
 
+> **⚠️ Work in progress.** This project has not been thoroughly audited. While the architecture is designed with isolation in mind, use it at your own risk.
+
 ### Why openbob?
 
 Most agent setups share a single process, a single context window, and a single filesystem. openbob takes a different approach:
