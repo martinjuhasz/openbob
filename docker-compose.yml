@@ -19,9 +19,8 @@ services:
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
       # Model — format: providerID/modelID
       - MODEL=${MODEL:-anthropic/claude-sonnet-4-6}
-      # API keys — forwarded to agent containers via client.auth.set()
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
-      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      # Auth: provider API keys are read from ${DATA_PATH}/opencode/auth.json
+      # (mounted into agent containers automatically — no env vars needed)
       # Paths inside container
       - DATA_DIR=/data
       # Docker

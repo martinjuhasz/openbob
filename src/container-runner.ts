@@ -70,42 +70,57 @@ const DOCKER_NETWORK = process.env['DOCKER_NETWORK'] ?? 'openbob';
 const DATA_PATH_HOST = process.env['DATA_PATH'] ?? DATA_DIR;
 
 // OpenViking memory integration
-const OV_URL = process.env['OPENVIKING_URL'];
 const OV_ACCOUNT = 'openbob';
 const OV_USER = 'default';
 
-// Cache the global user key after first read — it never changes at runtime
-let _ovGlobalUserKey: string | null | undefined = undefined;
+/** Lazy accessor for OpenViking URL — reads from validated env (not process.env). */
+function getOvUrl(): string | undefined {
+  return getEnv().OPENVIKING_URL;
+}
+
+// Cache the global user key after first successful read.
+// null results are NOT cached so the key is retried on subsequent calls
+// (handles race condition when OV container starts after the host).
+let _ovGlobalUserKey: string | undefined = undefined;
 function readOvGlobalUserKey(): string | null {
-  if (!OV_URL) return null;
+  if (!getOvUrl()) return null;
   if (_ovGlobalUserKey !== undefined) return _ovGlobalUserKey;
   try {
-    _ovGlobalUserKey = fs
+    const key = fs
       .readFileSync(path.join(DATA_DIR, 'openviking', 'ov_user.key'), 'utf-8')
       .trim();
+    if (key) {
+      _ovGlobalUserKey = key;
+      return key;
+    }
   } catch (err) {
     if (
       err instanceof Error &&
       'code' in err &&
       (err as NodeJS.ErrnoException).code === 'ENOENT'
     ) {
-      _ovGlobalUserKey = null;
+      // File not found — don't cache, retry on next call
     } else {
       throw err;
     }
   }
-  if (!_ovGlobalUserKey)
-    logger.warn(
-      'OpenViking URL configured but user key not found — memory disabled',
-    );
-  return _ovGlobalUserKey;
+  logger.debug(
+    'OpenViking user key not found yet — will retry on next request',
+  );
+  return null;
 }
 
-// Log once at startup whether OpenViking is enabled
-if (OV_URL) {
-  logger.info({ url: OV_URL }, 'OpenViking memory integration enabled');
-} else {
-  logger.info('OpenViking not configured — memory disabled');
+// Log OpenViking status once on first access
+let _ovStatusLogged = false;
+function logOvStatus(): void {
+  if (_ovStatusLogged) return;
+  _ovStatusLogged = true;
+  const url = getOvUrl();
+  if (url) {
+    logger.info({ url }, 'OpenViking memory integration enabled');
+  } else {
+    logger.info('OpenViking not configured — memory disabled');
+  }
 }
 
 /**
@@ -121,7 +136,7 @@ async function ovRequest(
   body?: unknown,
   headers?: Record<string, string>,
 ): Promise<unknown> {
-  const res = await fetch(`${OV_URL}/api/v1${endpoint}`, {
+  const res = await fetch(`${getOvUrl()}/api/v1${endpoint}`, {
     method,
     headers: {
       'Content-Type': 'application/json',
@@ -197,7 +212,8 @@ interface OvCredentials {
 async function getOvCredentials(
   groupFolder: string,
 ): Promise<OvCredentials | null> {
-  if (!OV_URL) return null;
+  logOvStatus();
+  if (!getOvUrl()) return null;
   const scope = getEnv().OPENVIKING_SCOPE;
 
   if (scope === 'group') {
@@ -450,6 +466,9 @@ async function spawnContainer(
   // Write base opencode.json (mounted ro at /workspace/opencode.json)
   writeOpencodeConfig(groupFolder, model);
 
+  // Copy shared auth.json into group's opencode dir (OpenCode discovers it natively)
+  writeAuthConfig(groupFolder);
+
   // Pre-create context.json so the file bind mount works at container start
   // It will be updated with real values in runAgentSession before each prompt
   const contextFile = path.join(groupDir, 'context.json');
@@ -572,50 +591,37 @@ async function waitForServer(containerName: string): Promise<void> {
   );
 }
 
+/** Path to the shared auth.json that users place in the data directory. */
+const AUTH_JSON_PATH = path.join(DATA_DIR, 'opencode', 'auth.json');
+
 /**
- * Configure provider auth on a freshly started agent container.
- * Derives the provider ID from the model string (first segment before '/'),
- * looks for `<PROVIDER>_API_KEY` in the host environment, and calls auth.set().
+ * Validate that the shared auth.json file exists.
+ * Called at host startup — exits with a clear error if missing.
  */
-async function configureAuth(
-  containerName: string,
-  model: string,
-): Promise<void> {
-  const providerID = model.split('/')[0];
-  if (!providerID) return;
-
-  const envKey = `${providerID.toUpperCase()}_API_KEY`;
-  const apiKey = process.env[envKey];
-  if (!apiKey) {
-    logger.debug(
-      { containerName, providerID, envKey },
-      'No API key found for provider — skipping auth.set()',
+export function validateAuthConfig(): void {
+  if (!fs.existsSync(AUTH_JSON_PATH)) {
+    console.error(
+      `\n❌  Missing auth configuration: ${AUTH_JSON_PATH}\n` +
+        `    Copy your OpenCode credentials into the data directory:\n` +
+        `      mkdir -p ${path.dirname(AUTH_JSON_PATH)}\n` +
+        `      cp ~/.local/share/opencode/auth.json ${AUTH_JSON_PATH}\n`,
     );
-    return;
+    process.exit(1);
   }
+  logger.info({ path: AUTH_JSON_PATH }, 'Auth config validated');
+}
 
-  const client = createOpencodeClient({
-    baseUrl: `http://${containerName}:${OPENCODE_PORT}`,
-  });
-
-  const res = await client.auth.set({
-    path: { id: providerID },
-    body: { type: 'api', key: apiKey },
-  });
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  if ((res as any).error) {
-    logger.warn(
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      { containerName, providerID, error: (res as any).error },
-      'Failed to configure provider auth',
-    );
-  } else {
-    logger.info(
-      { containerName, providerID },
-      'Provider API key configured on agent container',
-    );
-  }
+/**
+ * Copy the shared auth.json into a group's opencode directory.
+ * The agent container's entrypoint symlinks ~/.local/share/opencode →
+ * /workspace/data/opencode, so OpenCode discovers the auth natively.
+ */
+function writeAuthConfig(groupFolder: string): void {
+  const groupDir = path.join(GROUPS_DIR, groupFolder);
+  const destPath = path.join(groupDir, 'opencode', 'auth.json');
+  const content = fs.readFileSync(AUTH_JSON_PATH, 'utf-8');
+  fs.writeFileSync(destPath, content);
+  logger.debug({ groupFolder, destPath }, 'Copied auth.json to group');
 }
 
 /**
@@ -660,7 +666,6 @@ async function getAgentContainer(
   const p = (async () => {
     const name = await spawnContainer(groupFolder, model);
     await waitForServer(name);
-    await configureAuth(name, model);
     return name;
   })().finally(() => spawnInProgress.delete(groupFolder));
 

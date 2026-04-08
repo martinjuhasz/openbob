@@ -46,7 +46,7 @@ Messaging platform (Telegram / Mattermost)
 
 - Docker + Docker Compose
 - A messaging platform: **Telegram bot** (token from [@BotFather](https://t.me/BotFather)) or **Mattermost** instance with a bot account
-- An API key for your LLM provider (e.g., Anthropic, OpenRouter)
+- LLM provider credentials — openbob uses OpenCode's `auth.json` file (see [Authentication](#authentication))
 
 ### Setup
 
@@ -111,14 +111,29 @@ INITIAL_GROUP_IS_MAIN=true         # admin privileges (default: true)
 
 > Additional groups can be registered at runtime via the `register_group` MCP tool from the main channel's agent.
 
-Copy your OpenCode auth credentials:
+### Authentication
+
+openbob uses OpenCode's file-based authentication. Instead of passing API keys as environment variables, you provide a single `auth.json` file that gets copied into each agent container.
+
+**Step 1:** Authenticate with your LLM provider(s) locally using [OpenCode](https://opencode.ai):
+
+```bash
+# Run opencode locally and authenticate with your provider
+opencode
+```
+
+This creates `~/.local/share/opencode/auth.json` with your credentials.
+
+**Step 2:** Copy the auth file to your data directory:
 
 ```bash
 mkdir -p ${DATA_PATH}/opencode
 cp ~/.local/share/opencode/auth.json ${DATA_PATH}/opencode/auth.json
 ```
 
-Build and start:
+> **Required:** The host will refuse to start without this file. On startup it validates that `auth.json` exists and copies it into each agent container's OpenCode data directory.
+
+### Start
 
 ```bash
 docker compose build
@@ -183,7 +198,7 @@ Each agent container has everything mounted under `/workspace`:
   │  ├── opencode.json  ← optional: agent-created overrides for base config
   │  └── AGENTS.md      ← optional: agent-created supplemental instructions
   data/
-  │  ├── opencode/      ← OpenCode state (sessions, auth)
+  │  ├── opencode/      ← OpenCode state (sessions, auth.json — copied by host)
   │  └── telegram/
   │       └── files/    ← downloaded photos & documents (read-only)
   skills/               ← skill packs (read-only)
@@ -206,13 +221,14 @@ Same mechanism applies to `AGENTS.md` — both levels are concatenated, so the a
 
 1. Host receives a message for a group
 2. `getAgentContainer()` checks if a container exists or spawns a new one
-3. `writeOpencodeConfig()` writes a fresh `opencode.json` with the group's model config (no merging with existing)
-4. `context.json` is updated with the group's identity (`chatJid`, `groupFolder`, `isMain`)
-5. Container starts, OpenCode server boots on port 4096
-6. Host sends prompt via `client.session.promptAsync()`, polls for completion
-7. Agent processes the prompt, can call MCP tools (send messages, schedule tasks) via filesystem IPC
-8. Host collects the response and posts it to the channel
-9. Container stays warm for subsequent messages
+3. `writeAuthConfig()` copies `auth.json` into the group's OpenCode data directory
+4. `writeOpencodeConfig()` writes a fresh `opencode.json` with the group's model config (no merging with existing)
+5. `context.json` is updated with the group's identity (`chatJid`, `groupFolder`, `isMain`)
+6. Container starts, OpenCode server boots on port 4096
+7. Host sends prompt via `client.session.promptAsync()`, polls for completion
+8. Agent processes the prompt, can call MCP tools (send messages, schedule tasks) via filesystem IPC
+9. Host collects the response and posts it to the channel
+10. Container stays warm for subsequent messages
 
 ### Docker Network
 
@@ -236,24 +252,46 @@ All containers share the `openbob` Docker network. The host reaches agent contai
 
 ### Environment Variables
 
-| Variable                | Required  | Description                                                     |
-| ----------------------- | --------- | --------------------------------------------------------------- |
-| `DATA_PATH`             | Yes       | Absolute host path for persistent data                          |
-| `MODEL`                 | Yes       | Default model, e.g. `anthropic/claude-sonnet-4-6`               |
-| `TELEGRAM_BOT_TOKEN`    | Channel   | Telegram bot token (from @BotFather)                            |
-| `MATTERMOST_URL`        | Channel   | Mattermost server URL                                           |
-| `MATTERMOST_TOKEN`      | Channel   | Mattermost bot account token                                    |
-| `INITIAL_GROUP_JID`     | First run | Channel JID — prefix determines channel (`tg:` / `mm:`)         |
-| `INITIAL_GROUP_FOLDER`  | No        | Workspace folder name (default: `main`)                         |
-| `INITIAL_GROUP_TRIGGER` | No        | Trigger word (default: assistant name)                          |
-| `INITIAL_GROUP_IS_MAIN` | No        | `true` for admin channel (default: `true`)                      |
-| `LOG_LEVEL`             | No        | `trace` / `debug` / `info` / `warn` / `error` (default: `info`) |
-| `AGENT_FORWARD_ENV`     | No        | Comma-separated env vars to forward to agent containers         |
-| `OPENVIKING_URL`        | No        | OpenViking API URL (default: `http://openviking:1933`)          |
+| Variable                | Required  | Description                                                       |
+| ----------------------- | --------- | ----------------------------------------------------------------- |
+| `DATA_PATH`             | Yes       | Absolute host path for persistent data                            |
+| `MODEL`                 | Yes       | Default model, e.g. `anthropic/claude-sonnet-4-6`                 |
+| `TELEGRAM_BOT_TOKEN`    | Channel   | Telegram bot token (from @BotFather)                              |
+| `MATTERMOST_URL`        | Channel   | Mattermost server URL                                             |
+| `MATTERMOST_TOKEN`      | Channel   | Mattermost bot account token                                      |
+| `INITIAL_GROUP_JID`     | First run | Channel JID — prefix determines channel (`tg:` / `mm:`)           |
+| `INITIAL_GROUP_FOLDER`  | No        | Workspace folder name (default: `main`)                           |
+| `INITIAL_GROUP_TRIGGER` | No        | Trigger word (default: assistant name)                            |
+| `INITIAL_GROUP_IS_MAIN` | No        | `true` for admin channel (default: `true`)                        |
+| `LOG_LEVEL`             | No        | `trace` / `debug` / `info` / `warn` / `error` (default: `info`)   |
+| `AGENT_FORWARD_ENV`     | No        | Comma-separated env vars to forward to agent containers           |
+| `AGENT_TIMEOUT`         | No        | Agent response timeout in ms (default: `480000` / 8 min)          |
+| `AGENT_STARTUP_TIMEOUT` | No        | Container startup health-check timeout in ms (default: `30000`)   |
+| `IDLE_TIMEOUT`          | No        | Stop containers after this idle duration in ms (default: never)   |
+| `OPENVIKING_URL`        | No        | OpenViking API URL (default: `http://openviking:1933`)            |
+| `OPENVIKING_API_KEY`    | No        | OpenViking root API key — required for `group` scope provisioning |
+| `OPENVIKING_SCOPE`      | No        | `global` or `group` (default: `global`) — see below               |
+
+> **Note:** LLM provider API keys are **not** configured via environment variables. Authentication is handled entirely through `auth.json` — see [Authentication](#authentication).
 
 ### Per-Group Model Override
 
 Groups can use different models. Set the `model` field when registering a group (via MCP tool or database), and it overrides the global `MODEL` env var for that group.
+
+### OpenViking Configuration
+
+[OpenViking](https://github.com/volcengine/OpenViking) provides persistent semantic memory across agent sessions. It's optional — if `OPENVIKING_URL` is not set (or the service isn't running), agents work without memory.
+
+**Scopes:**
+
+| Scope    | How it works                                                                                                                                                                  |
+| -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `global` | All groups share one OpenViking user. The host reads a shared user key from `${DATA_PATH}/ov_user.key`.                                                                       |
+| `group`  | Each group gets its own OpenViking user, provisioned on first interaction via the Admin API. Requires `OPENVIKING_API_KEY`. Per-group keys are stored in the SQLite database. |
+
+**Setup with `docker compose --profile memory`:**
+
+The OpenViking service needs its own LLM access for embedding/extraction. Configure `OPENROUTER_API_KEY` (or equivalent) in the `openviking` service section of `docker-compose.yml` — this key is only used by OpenViking itself, not by agents.
 
 ## MCP Servers
 

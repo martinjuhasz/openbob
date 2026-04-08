@@ -22,13 +22,9 @@ const mockClientSession = vi.hoisted(() => ({
   promptAsync: vi.fn(),
   messages: vi.fn(),
 }));
-const mockClientAuth = vi.hoisted(() => ({
-  set: vi.fn(),
-}));
 const mockCreateOpencodeClient = vi.hoisted(() =>
   vi.fn().mockReturnValue({
     session: mockClientSession,
-    auth: mockClientAuth,
   }),
 );
 
@@ -81,12 +77,26 @@ vi.mock('./logger.js', () => ({
   },
 }));
 
+const AUTH_JSON_CONTENT = JSON.stringify({
+  anthropic: { type: 'api', key: 'sk-test-key' },
+});
+
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 const originalEnv = process.env;
 
 function dockerOk(stdout = ''): Promise<{ stdout: string; stderr: string }> {
   return Promise.resolve({ stdout, stderr: '' });
+}
+
+/** Default readFileSync handler: returns auth.json for the auth path, ENOENT otherwise. */
+function defaultReadFileSync(p: string): string {
+  if (typeof p === 'string' && p === '/data/opencode/auth.json') {
+    return AUTH_JSON_CONTENT;
+  }
+  const err: NodeJS.ErrnoException = new Error('ENOENT');
+  err.code = 'ENOENT';
+  throw err;
 }
 
 /** Import a fresh container-runner module (resets internal Maps). */
@@ -105,11 +115,7 @@ describe('container-runner', () => {
     mockExecFile.mockImplementation(() => dockerOk());
     mockExecFileSync.mockReturnValue(Buffer.from(''));
     mockFs.existsSync.mockReturnValue(false);
-    mockFs.readFileSync.mockImplementation(() => {
-      const err: NodeJS.ErrnoException = new Error('ENOENT');
-      err.code = 'ENOENT';
-      throw err;
-    });
+    mockFs.readFileSync.mockImplementation(defaultReadFileSync);
   });
 
   afterEach(() => {
@@ -226,10 +232,6 @@ describe('container-runner', () => {
         vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) }),
       );
 
-      // configureAuth: auth.set succeeds
-      process.env['ANTHROPIC_API_KEY'] = 'sk-test-key';
-      mockClientAuth.set.mockResolvedValue({ data: {} });
-
       const { warmUpContainers } = await importRunner();
       await warmUpContainers([
         { folder: 'test-group', model: 'anthropic/claude-sonnet-4-6' },
@@ -271,8 +273,6 @@ describe('container-runner', () => {
         'fetch',
         vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) }),
       );
-      process.env['ANTHROPIC_API_KEY'] = 'sk-test';
-      mockClientAuth.set.mockResolvedValue({ data: {} });
 
       // Template at /workspace/opencode.json with shared settings
       const template = {
@@ -282,6 +282,7 @@ describe('container-runner', () => {
       };
       mockFs.readFileSync.mockImplementation((p: string) => {
         if (p === '/workspace/opencode.json') return JSON.stringify(template);
+        if (p === '/data/opencode/auth.json') return AUTH_JSON_CONTENT;
         const err: NodeJS.ErrnoException = new Error('ENOENT');
         err.code = 'ENOENT';
         throw err;
@@ -326,11 +327,11 @@ describe('container-runner', () => {
         'fetch',
         vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) }),
       );
-      process.env['ANTHROPIC_API_KEY'] = 'sk-test';
-      mockClientAuth.set.mockResolvedValue({ data: {} });
 
-      // No template file → readFileSync always throws
-      mockFs.readFileSync.mockImplementation(() => {
+      // No template file → readFileSync returns auth.json only, ENOENT for rest
+      mockFs.readFileSync.mockImplementation((p: string) => {
+        if (typeof p === 'string' && p === '/data/opencode/auth.json')
+          return AUTH_JSON_CONTENT;
         const err: NodeJS.ErrnoException = new Error('ENOENT');
         err.code = 'ENOENT';
         throw err;
@@ -370,8 +371,6 @@ describe('container-runner', () => {
         'fetch',
         vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) }),
       );
-      process.env['ANTHROPIC_API_KEY'] = 'sk-test';
-      mockClientAuth.set.mockResolvedValue({ data: {} });
 
       // Template with base settings
       const template = {
@@ -380,6 +379,7 @@ describe('container-runner', () => {
       };
       mockFs.readFileSync.mockImplementation((p: string) => {
         if (p === '/workspace/opencode.json') return JSON.stringify(template);
+        if (p === '/data/opencode/auth.json') return AUTH_JSON_CONTENT;
         const err: NodeJS.ErrnoException = new Error('ENOENT');
         err.code = 'ENOENT';
         throw err;
@@ -437,7 +437,6 @@ describe('container-runner', () => {
         'fetch',
         vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) }),
       );
-      mockClientAuth.set.mockResolvedValue({ data: {} });
 
       const { warmUpContainers } = await importRunner();
       await warmUpContainers([
@@ -462,10 +461,10 @@ describe('container-runner', () => {
     });
   });
 
-  // ── configureAuth (tested via warmUp → spawn → configure) ──────────────
+  // ── writeAuthConfig (tested via warmUp → spawn) ────────────────────────
 
-  describe('configureAuth', () => {
-    it('calls auth.set with provider derived from model string', async () => {
+  describe('writeAuthConfig', () => {
+    it('copies auth.json to group opencode directory on spawn', async () => {
       mockExecFile.mockImplementation((_cmd: string, args: string[]) => {
         if (args[0] === 'inspect' && args.length > 2)
           return dockerOk('/workspace:/host/workspace;');
@@ -479,51 +478,51 @@ describe('container-runner', () => {
         'fetch',
         vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) }),
       );
-      process.env['OPENROUTER_API_KEY'] = 'sk-or-test';
-      mockClientAuth.set.mockResolvedValue({ data: {} });
 
       const { warmUpContainers } = await importRunner();
       await warmUpContainers([
-        {
-          folder: 'auth-group',
-          model: 'openrouter/anthropic/claude-sonnet-4-6',
-        },
+        { folder: 'auth-group', model: 'anthropic/claude-sonnet-4-6' },
       ]);
 
-      expect(mockClientAuth.set).toHaveBeenCalledWith({
-        path: { id: 'openrouter' },
-        body: { type: 'api', key: 'sk-or-test' },
-      });
+      // Find the writeFileSync call for auth.json in the group dir
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const authCalls = (mockFs.writeFileSync.mock.calls as any[]).filter(
+        (c) =>
+          typeof c[0] === 'string' &&
+          c[0].includes('auth-group') &&
+          c[0].endsWith('auth.json'),
+      );
+      expect(authCalls.length).toBe(1);
+      expect(authCalls[0][1]).toBe(AUTH_JSON_CONTENT);
 
       vi.unstubAllGlobals();
     });
+  });
 
-    it('skips auth.set when no matching API key env var exists', async () => {
-      mockExecFile.mockImplementation((_cmd: string, args: string[]) => {
-        if (args[0] === 'inspect' && args.length > 2)
-          return dockerOk('/workspace:/host/workspace;');
-        if (args[0] === 'ps') return dockerOk('\n');
-        if (args[0] === 'rm') return dockerOk();
-        if (args[0] === 'run') return dockerOk('id');
-        return dockerOk();
+  // ── validateAuthConfig ─────────────────────────────────────────────────
+
+  describe('validateAuthConfig', () => {
+    it('succeeds when auth.json exists', async () => {
+      mockFs.existsSync.mockImplementation((p: string) => {
+        if (p === '/data/opencode/auth.json') return true;
+        return false;
       });
 
-      vi.stubGlobal(
-        'fetch',
-        vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) }),
-      );
-      // No API key set for anthropic
-      delete process.env['ANTHROPIC_API_KEY'];
-      mockClientAuth.set.mockResolvedValue({ data: {} });
+      const { validateAuthConfig } = await importRunner();
+      expect(() => validateAuthConfig()).not.toThrow();
+    });
 
-      const { warmUpContainers } = await importRunner();
-      await warmUpContainers([
-        { folder: 'noauth-group', model: 'anthropic/claude-sonnet-4-6' },
-      ]);
+    it('exits when auth.json is missing', async () => {
+      mockFs.existsSync.mockReturnValue(false);
+      const mockExit = vi
+        .spyOn(process, 'exit')
+        .mockImplementation(() => undefined as never);
 
-      expect(mockClientAuth.set).not.toHaveBeenCalled();
+      const { validateAuthConfig } = await importRunner();
+      validateAuthConfig();
 
-      vi.unstubAllGlobals();
+      expect(mockExit).toHaveBeenCalledWith(1);
+      mockExit.mockRestore();
     });
   });
 
@@ -554,9 +553,6 @@ describe('container-runner', () => {
         'fetch',
         vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) }),
       );
-
-      process.env['ANTHROPIC_API_KEY'] = 'sk-test';
-      mockClientAuth.set.mockResolvedValue({ data: {} });
 
       // Session flow
       mockClientSession.create.mockResolvedValue({
@@ -758,7 +754,6 @@ describe('container-runner', () => {
         'fetch',
         vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) }),
       );
-      mockClientAuth.set.mockResolvedValue({ data: {} });
 
       const { warmUpContainers } = await importRunner();
       await warmUpContainers([
@@ -804,8 +799,6 @@ describe('container-runner', () => {
         'fetch',
         vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) }),
       );
-      mockClientAuth.set.mockResolvedValue({ data: {} });
-
       const { warmUpContainers } = await importRunner();
       await warmUpContainers([
         { folder: 'shell-test', model: 'anthropic/claude-sonnet-4-6' },
@@ -895,6 +888,22 @@ describe('OpenViking scope', () => {
       return dockerOk();
     });
 
+    // Allow auth.json reads (writeAuthConfig) and ov_user.key reads
+    const prevReadFileSync = mockFs.readFileSync.getMockImplementation();
+    mockFs.readFileSync.mockImplementation((p: string, ...rest: unknown[]) => {
+      if (typeof p === 'string' && p.includes('auth.json'))
+        return '{"providers":{}}';
+      if (prevReadFileSync) return prevReadFileSync(p, ...rest);
+      const err: NodeJS.ErrnoException = new Error('ENOENT');
+      err.code = 'ENOENT';
+      throw err;
+    });
+    mockFs.writeFileSync.mockImplementation(() => {});
+    mockFs.existsSync.mockImplementation((p: unknown) => {
+      if (typeof p === 'string' && p.includes('auth.json')) return true;
+      return false;
+    });
+
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue({
@@ -904,7 +913,6 @@ describe('OpenViking scope', () => {
     );
 
     process.env['ANTHROPIC_API_KEY'] = 'sk-test';
-    mockClientAuth.set.mockResolvedValue({ data: {} });
     mockClientSession.create.mockResolvedValue({
       data: { id: 'sess-123' },
     });
@@ -930,6 +938,7 @@ describe('OpenViking scope', () => {
     const { getEnv } = await import('./env.js');
     vi.mocked(getEnv).mockReturnValue({
       MODEL: 'anthropic/claude-sonnet-4-6',
+      OPENVIKING_URL: 'http://openviking:1933',
       OPENVIKING_SCOPE: 'global',
       LOG_LEVEL: 'info',
     } as ReturnType<typeof getEnv>);
@@ -986,6 +995,7 @@ describe('OpenViking scope', () => {
     const { getEnv } = await import('./env.js');
     vi.mocked(getEnv).mockReturnValue({
       MODEL: 'anthropic/claude-sonnet-4-6',
+      OPENVIKING_URL: 'http://openviking:1933',
       OPENVIKING_SCOPE: 'group',
       OPENVIKING_API_KEY: 'root-key',
       LOG_LEVEL: 'info',
@@ -1037,6 +1047,7 @@ describe('OpenViking scope', () => {
     const { getEnv } = await import('./env.js');
     vi.mocked(getEnv).mockReturnValue({
       MODEL: 'anthropic/claude-sonnet-4-6',
+      OPENVIKING_URL: 'http://openviking:1933',
       OPENVIKING_SCOPE: 'group',
       OPENVIKING_API_KEY: 'root-key',
       LOG_LEVEL: 'info',
@@ -1092,6 +1103,7 @@ describe('OpenViking scope', () => {
     const { getEnv } = await import('./env.js');
     vi.mocked(getEnv).mockReturnValue({
       MODEL: 'anthropic/claude-sonnet-4-6',
+      OPENVIKING_URL: 'http://openviking:1933',
       OPENVIKING_SCOPE: 'global',
       LOG_LEVEL: 'info',
     } as ReturnType<typeof getEnv>);
@@ -1148,6 +1160,7 @@ describe('OpenViking scope', () => {
     const { getEnv } = await import('./env.js');
     vi.mocked(getEnv).mockReturnValue({
       MODEL: 'anthropic/claude-sonnet-4-6',
+      OPENVIKING_URL: 'http://openviking:1933',
       OPENVIKING_SCOPE: 'group',
       OPENVIKING_API_KEY: 'root-key',
       LOG_LEVEL: 'info',

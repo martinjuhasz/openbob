@@ -14,6 +14,7 @@ import {
   runAgentSession,
   warmUpContainers,
   startIdleChecker,
+  validateAuthConfig,
 } from './container-runner.js';
 import {
   getAllRegisteredGroups,
@@ -324,6 +325,7 @@ async function main(): Promise<void> {
   loadEnv();
   initDatabase();
   logger.info('Database initialized');
+  validateAuthConfig();
   loadState();
   registerInitialGroupFromEnv();
 
