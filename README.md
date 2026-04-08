@@ -291,7 +291,7 @@ Groups can use different models. Set the `model` field when registering a group 
 
 **Setup with `docker compose --profile memory`:**
 
-The OpenViking service needs its own LLM access for embedding/extraction. Configure `OPENROUTER_API_KEY` (or equivalent) in the `openviking` service section of `docker-compose.yml` — this key is only used by OpenViking itself, not by agents.
+The OpenViking service needs its own LLM access for embedding/extraction. Configure `OPENVIKING_LLM_KEY` in your `.env` file — this key is only used by OpenViking itself, not by agents.
 
 ## MCP Servers
 

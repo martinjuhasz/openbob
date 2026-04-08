@@ -3,7 +3,7 @@
 
 set -e
 
-: "${OPENROUTER_API_KEY:?OPENROUTER_API_KEY is required}"
+: "${OPENVIKING_LLM_KEY:?OPENVIKING_LLM_KEY is required}"
 
 EMBEDDING_API_BASE="${OPENVIKING_EMBEDDING_API_BASE:-https://openrouter.ai/api/v1}"
 EMBEDDING_MODEL="${OPENVIKING_EMBEDDING_MODEL:-openai/text-embedding-3-small}"
@@ -29,7 +29,7 @@ cat >/app/ov.conf <<EOF
     "dense": {
       "provider": "openai",
       "api_base": "${EMBEDDING_API_BASE}",
-      "api_key": "${OPENROUTER_API_KEY}",
+      "api_key": "${OPENVIKING_LLM_KEY}",
       "model": "${EMBEDDING_MODEL}",
       "dimension": ${EMBEDDING_DIMENSION}
     }
@@ -37,7 +37,7 @@ cat >/app/ov.conf <<EOF
   "vlm": {
     "provider": "openai",
     "api_base": "${LLM_API_BASE}",
-    "api_key": "${OPENROUTER_API_KEY}",
+    "api_key": "${OPENVIKING_LLM_KEY}",
     "model": "${OPENVIKING_LLM_MODEL}"
   }
 }

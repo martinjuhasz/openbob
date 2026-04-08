@@ -66,7 +66,7 @@ services:
     volumes:
       - ${DATA_PATH}/openviking:/data
     environment:
-      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - OPENVIKING_LLM_KEY=${OPENVIKING_LLM_KEY}
       - OPENVIKING_LLM_MODEL=${OPENVIKING_LLM_MODEL:-openai/gpt-4o-mini}
       - OPENVIKING_EMBEDDING_MODEL=${OPENVIKING_EMBEDDING_MODEL:-openai/text-embedding-3-small}
       - OPENVIKING_EMBEDDING_API_BASE=${OPENVIKING_EMBEDDING_API_BASE:-https://openrouter.ai/api/v1}

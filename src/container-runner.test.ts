@@ -912,7 +912,6 @@ describe('OpenViking scope', () => {
       }),
     );
 
-    process.env['ANTHROPIC_API_KEY'] = 'sk-test';
     mockClientSession.create.mockResolvedValue({
       data: { id: 'sess-123' },
     });

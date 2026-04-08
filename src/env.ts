@@ -23,7 +23,7 @@ const envSchema = z.object({
   MODEL: z.string().min(1),
 
   // Comma-separated list of env var names to forward to agent containers.
-  // Example: ANTHROPIC_API_KEY,OPENROUTER_API_KEY,AWS_ACCESS_KEY_ID,AWS_SECRET_ACCESS_KEY
+  // Example: HTTPS_PROXY,NO_PROXY,AWS_ACCESS_KEY_ID,AWS_SECRET_ACCESS_KEY
   AGENT_FORWARD_ENV: z.preprocess(emptyToUndefined, z.string().optional()),
 
   // Agent response timeout in ms. How long to wait for an agent to finish processing a prompt.
