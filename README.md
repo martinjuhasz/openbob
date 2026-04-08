@@ -1,6 +1,12 @@
+<p align="center">
+  <img src="docs/images/bob.jpg" width="200" alt="openbob" />
+</p>
+
 # openbob
 
 **An isolated agent runner for messaging platforms.** Each chat group gets its own sandboxed AI agent in a dedicated Docker container — with [OpenCode](https://opencode.ai) as the agent runtime and [OpenViking](https://github.com/volcengine/OpenViking) as persistent context memory.
+
+**~5,000 lines of TypeScript. That's the entire thing.** No framework maze, no abstraction layers — just a single Node.js process orchestrating Docker containers. Read it in an afternoon, fork it, make it yours.
 
 ### Why openbob?
 
