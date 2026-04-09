@@ -1342,6 +1342,55 @@ describe('TelegramChannel', () => {
       );
       expect(content).toContain('Here is the report');
     });
+
+    it('sanitizes path traversal in document filename', async () => {
+      mockSuccessfulDownload();
+      const { handler } = await getDocHandler();
+
+      await handler({
+        chat: { id: 999, type: 'group', title: 'Test' },
+        from: { id: 42, first_name: 'Alice' },
+        message: {
+          date: Math.floor(Date.now() / 1000),
+          message_id: 70,
+          document: {
+            file_id: 'doc_id',
+            file_name: '../../../etc/passwd',
+          },
+        },
+      });
+
+      // File should be written with sanitized name, no path traversal
+      const writePath = mockWriteFileSync.mock.calls[0]?.[0] as string;
+      expect(writePath).not.toContain('..');
+      expect(writePath).toMatch(
+        /^\/test-data\/groups\/test\/telegram\/files\/doc_70_\d+_passwd$/,
+      );
+    });
+
+    it('replaces special characters in document filename', async () => {
+      mockSuccessfulDownload();
+      const { handler } = await getDocHandler();
+
+      await handler({
+        chat: { id: 999, type: 'group', title: 'Test' },
+        from: { id: 42, first_name: 'Alice' },
+        message: {
+          date: Math.floor(Date.now() / 1000),
+          message_id: 71,
+          document: {
+            file_id: 'doc_id',
+            file_name: 'my file (v2).pdf',
+          },
+        },
+      });
+
+      const writePath = mockWriteFileSync.mock.calls[0]?.[0] as string;
+      // Spaces and parens should be replaced with underscores
+      expect(writePath).toMatch(
+        /^\/test-data\/groups\/test\/telegram\/files\/doc_71_\d+_my_file__v2_.pdf$/,
+      );
+    });
   });
 
   describe('registerChannel side effect', () => {

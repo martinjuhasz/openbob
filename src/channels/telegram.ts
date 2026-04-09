@@ -323,16 +323,19 @@ export class TelegramChannel implements Channel {
       const chatJid = `${JID_PREFIX}${ctx.chat.id}`;
       const group = this.registeredGroups()[chatJid];
       const docName = ctx.message.document?.file_name || 'file';
+      // Sanitize user-supplied filename: strip path components, allow only safe chars
+      const safeDocName =
+        path.basename(docName).replace(/[^a-zA-Z0-9._-]/g, '_') || 'file';
 
       if (!group) {
-        storeNonText(ctx, `[Document: ${docName}]`);
+        storeNonText(ctx, `[Document: ${safeDocName}]`);
         return;
       }
 
       try {
         const fileId = ctx.message.document?.file_id;
         if (!fileId) {
-          storeNonText(ctx, `[Document: ${docName}]`);
+          storeNonText(ctx, `[Document: ${safeDocName}]`);
           return;
         }
 
@@ -344,7 +347,7 @@ export class TelegramChannel implements Channel {
         );
         fs.mkdirSync(filesDir, { recursive: true });
 
-        const filename = `doc_${ctx.message.message_id}_${Date.now()}_${docName}`;
+        const filename = `doc_${ctx.message.message_id}_${Date.now()}_${safeDocName}`;
         const hostPath = path.join(filesDir, filename);
         const containerPath = `/workspace/data/telegram/files/${filename}`;
 
@@ -357,7 +360,7 @@ export class TelegramChannel implements Channel {
           );
           storeNonText(ctx, `[Document: ${containerPath}]`);
         } else {
-          storeNonText(ctx, `[Document: ${docName} - download failed]`);
+          storeNonText(ctx, `[Document: ${safeDocName} - download failed]`);
         }
         // eslint-disable-next-line no-catch-all/no-catch-all -- graceful degradation for document download
       } catch (err) {
@@ -365,7 +368,7 @@ export class TelegramChannel implements Channel {
           { err },
           'Failed to download Telegram document, using placeholder',
         );
-        storeNonText(ctx, `[Document: ${docName} - download failed]`);
+        storeNonText(ctx, `[Document: ${safeDocName} - download failed]`);
       }
     });
     this.bot.on('message:sticker', (ctx) => {
