@@ -87,6 +87,8 @@ async function runTask(
       ? (deps.getSession(task.group_folder) ?? undefined)
       : undefined;
 
+  let failed = false;
+
   try {
     const model = group.model ?? getEnv().MODEL;
 
@@ -108,6 +110,7 @@ async function runTask(
       const text = formatOutbound(output.result);
       if (text) await deps.sendMessage(task.jid, text);
     } else if (output.status === 'error') {
+      failed = true;
       logger.error(
         { taskId: task.id, error: output.error },
         'Task agent error',
@@ -119,14 +122,23 @@ async function runTask(
     }
     // eslint-disable-next-line no-catch-all/no-catch-all -- isolate task failure from scheduler
   } catch (err) {
+    failed = true;
     logger.error({ taskId: task.id, err }, 'Task failed');
   }
 
   // Advance or remove task
   const nextRun = computeNextRun(task);
   if (nextRun === null) {
-    deleteTask(task.id);
-    logger.info({ taskId: task.id }, 'One-time task completed and removed');
+    if (failed) {
+      upsertTask({ ...task, status: 'paused' });
+      logger.warn(
+        { taskId: task.id },
+        'One-time task failed — paused for inspection',
+      );
+    } else {
+      deleteTask(task.id);
+      logger.info({ taskId: task.id }, 'One-time task completed and removed');
+    }
   } else {
     upsertTask({ ...task, next_run: nextRun });
     logger.info({ taskId: task.id, nextRun }, 'Task rescheduled');
@@ -166,3 +178,6 @@ export function startSchedulerLoop(deps: SchedulerDeps): void {
 export function _resetSchedulerLoopForTests(): void {
   schedulerRunning = false;
 }
+
+/** @internal - for tests only */
+export const _runTaskForTests = runTask;
