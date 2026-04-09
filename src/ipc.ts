@@ -82,6 +82,14 @@ export function resolveContainerPath(
   return null;
 }
 
+/**
+ * Format an outbound IPC message, optionally prefixing with sender identity.
+ * Uses `[sender]: text` format compatible with OpenViking memory.
+ */
+export function formatIpcOutbound(text: string, sender?: string): string {
+  return sender ? `[${sender}]: ${text}` : text;
+}
+
 let ipcWatcherRunning = false;
 
 export function startIpcWatcher(deps: IpcDeps): void {
@@ -138,10 +146,10 @@ export function startIpcWatcher(deps: IpcDeps): void {
                   isMain ||
                   (targetGroup && targetGroup.folder === sourceGroup)
                 ) {
-                  const outText = data.sender
-                    ? `[${data.sender}]: ${data.text}`
-                    : data.text;
-                  await deps.sendMessage(data.chatJid, outText);
+                  await deps.sendMessage(
+                    data.chatJid,
+                    formatIpcOutbound(data.text, data.sender),
+                  );
                   logger.info(
                     { chatJid: data.chatJid, sourceGroup },
                     'IPC message sent',

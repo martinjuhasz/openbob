@@ -1,5 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { processTaskIpc, resolveContainerPath, IpcDeps } from './ipc.js';
+import {
+  processTaskIpc,
+  resolveContainerPath,
+  formatIpcOutbound,
+  IpcDeps,
+} from './ipc.js';
 import { GroupConfig } from './types.js';
 
 // Mock the db module
@@ -1181,5 +1186,21 @@ describe('resolveContainerPath', () => {
       'grp',
     );
     expect(result).toBe('/data/groups/grp/sub/dir/file.png');
+  });
+});
+
+describe('formatIpcOutbound', () => {
+  it('prefixes text with sender in bracket format', () => {
+    expect(formatIpcOutbound('Hello world', 'Assistant')).toBe(
+      '[Assistant]: Hello world',
+    );
+  });
+
+  it('returns text as-is when sender is undefined', () => {
+    expect(formatIpcOutbound('Hello world')).toBe('Hello world');
+  });
+
+  it('returns text as-is when sender is empty string', () => {
+    expect(formatIpcOutbound('Hello world', '')).toBe('Hello world');
   });
 });
