@@ -381,6 +381,16 @@ async function main(): Promise<void> {
         group.jid = newJid;
         registeredGroups[newJid] = group;
       }
+      // Migrate in-memory cursors so the new JID doesn't reprocess old history
+      if (lastAgentTimestamp[oldJid] !== undefined) {
+        lastAgentTimestamp[newJid] = lastAgentTimestamp[oldJid];
+        delete lastAgentTimestamp[oldJid];
+        saveState();
+      }
+      if (agentFailCount[oldJid] !== undefined) {
+        agentFailCount[newJid] = agentFailCount[oldJid];
+        delete agentFailCount[oldJid];
+      }
       logger.info(
         { oldJid, newJid },
         'Group JID migrated (Telegram supergroup upgrade)',
