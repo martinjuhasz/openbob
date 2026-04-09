@@ -13,6 +13,7 @@ import {
   stopGroupContainer,
   runAgentSession,
   warmUpContainers,
+  startupWarmUp,
   startIdleChecker,
   validateAuthConfig,
 } from './container-runner.js';
@@ -483,9 +484,7 @@ async function main(): Promise<void> {
     folder: g.folder,
     model: g.model ?? env.MODEL,
   }));
-  warmUpContainers(groups).catch((err) =>
-    logger.warn({ err }, 'Pre-warm error'),
-  );
+  startupWarmUp(groups).catch((err) => logger.warn({ err }, 'Pre-warm error'));
 
   // Start idle timeout checker (only active if IDLE_TIMEOUT is set)
   startIdleChecker();

@@ -899,6 +899,15 @@ export async function runAgentSession(
       }
     }
 
+    // Snapshot the last message ID before prompting so we can detect stale responses.
+    const prePromptMessages = await client.session
+      .messages({ path: { id: sessionId } })
+      .catch(() => null);
+    const prePromptLastId =
+      prePromptMessages?.data && prePromptMessages.data.length > 0
+        ? prePromptMessages.data[prePromptMessages.data.length - 1]?.info?.id
+        : undefined;
+
     logger.debug(
       { groupFolder, sessionId, chars: prompt.length, prompt },
       'Sending prompt to OpenCode',
@@ -978,11 +987,23 @@ export async function runAgentSession(
       }
     }
 
-    // Fetch messages and find last assistant message
+    // Fetch messages and find last assistant message added AFTER our prompt
     const messagesRes = await client.session.messages({
       path: { id: sessionId },
     });
-    const messages = messagesRes.data ?? [];
+    const allMessages = messagesRes.data ?? [];
+
+    // Only inspect messages that arrived after the pre-prompt snapshot.
+    // This prevents returning a stale response from a previous turn on timeout/abort.
+    let messages = allMessages;
+    if (prePromptLastId) {
+      const cutoffIdx = allMessages.findIndex(
+        (m) => m.info?.id === prePromptLastId,
+      );
+      if (cutoffIdx !== -1) {
+        messages = allMessages.slice(cutoffIdx + 1);
+      }
+    }
 
     // Find last assistant message (in reverse)
     const assistantMsg = [...messages]
@@ -1107,14 +1128,41 @@ export async function runAgentSession(
 }
 
 /**
- * Pre-warm agent containers for all registered groups so they're ready on first message.
+ * Pre-warm agent containers for the given groups.
+ * Does NOT clean up existing containers — safe to call at runtime.
  */
 export async function warmUpContainers(
   groups: Array<{ folder: string; model: string }>,
 ): Promise<void> {
   if (groups.length === 0) return;
   await resolveHostPaths();
+  logger.info({ count: groups.length }, 'Pre-warming agent containers');
+  await Promise.allSettled(
+    groups.map(async ({ folder, model }) => {
+      try {
+        await getAgentContainer(folder, model);
+        logger.info({ folder }, 'Agent container pre-warmed');
+        // eslint-disable-next-line no-catch-all/no-catch-all -- pre-warm is best-effort
+      } catch (err) {
+        logger.warn(
+          { folder, err },
+          'Pre-warm failed — will retry on first message',
+        );
+      }
+    }),
+  );
+}
+
+/**
+ * Startup variant: clean up ALL old agent containers first, then pre-warm.
+ * Only call this once during host startup to remove orphans from previous runs.
+ */
+export async function startupWarmUp(
+  groups: Array<{ folder: string; model: string }>,
+): Promise<void> {
+  await resolveHostPaths();
   await cleanupAllAgentContainers();
+  if (groups.length === 0) return;
   logger.info({ count: groups.length }, 'Pre-warming agent containers');
   await Promise.allSettled(
     groups.map(async ({ folder, model }) => {

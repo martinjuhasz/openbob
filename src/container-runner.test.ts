@@ -254,6 +254,107 @@ describe('container-runner', () => {
       await warmUpContainers([]);
       expect(mockExecFile).not.toHaveBeenCalled();
     });
+
+    it('does not call cleanupAllAgentContainers (no docker rm -f)', async () => {
+      mockExecFile.mockImplementation((_cmd: string, args: string[]) => {
+        if (args[0] === 'inspect' && args.length > 2) {
+          return dockerOk('/workspace:/host/workspace;/skills:/host/skills;');
+        }
+        if (args[0] === 'run') return dockerOk('container-id-456');
+        return dockerOk();
+      });
+
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) }),
+      );
+
+      const { warmUpContainers } = await importRunner();
+      await warmUpContainers([
+        { folder: 'runtime-group', model: 'anthropic/claude-sonnet-4-6' },
+      ]);
+
+      // cleanupAllAgentContainers calls docker ps -aq --filter label=openbob.group
+      // then docker rm -f. Verify no 'ps' call with '-aq' was made.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const psCleanupCall = (mockExecFile.mock.calls as any[]).find(
+        (c) =>
+          c[1]?.[0] === 'ps' &&
+          c[1]?.includes('-aq') &&
+          c[1]?.includes('label=openbob.group'),
+      );
+      expect(psCleanupCall).toBeUndefined();
+
+      vi.unstubAllGlobals();
+    });
+  });
+
+  // ── startupWarmUp ──────────────────────────────────────────────────────
+
+  describe('startupWarmUp', () => {
+    it('calls cleanupAllAgentContainers before spawning containers', async () => {
+      const callOrder: string[] = [];
+
+      mockExecFile.mockImplementation((_cmd: string, args: string[]) => {
+        if (args[0] === 'inspect' && args.length > 2) {
+          return dockerOk('/workspace:/host/workspace;/skills:/host/skills;');
+        }
+        if (args[0] === 'ps' && args.includes('-aq')) {
+          callOrder.push('cleanup-ps');
+          return dockerOk('old-container\n');
+        }
+        if (args[0] === 'rm' && args.includes('-f')) {
+          callOrder.push('cleanup-rm');
+          return dockerOk();
+        }
+        if (args[0] === 'run') {
+          callOrder.push('run');
+          return dockerOk('new-container-id');
+        }
+        return dockerOk();
+      });
+
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) }),
+      );
+
+      const { startupWarmUp } = await importRunner();
+      await startupWarmUp([
+        { folder: 'startup-group', model: 'anthropic/claude-sonnet-4-6' },
+      ]);
+
+      // Cleanup should have happened
+      expect(callOrder).toContain('cleanup-ps');
+      expect(callOrder).toContain('cleanup-rm');
+      // And cleanup should be before run
+      const cleanupIdx = callOrder.indexOf('cleanup-rm');
+      const runIdx = callOrder.indexOf('run');
+      expect(cleanupIdx).toBeLessThan(runIdx);
+
+      vi.unstubAllGlobals();
+    });
+
+    it('still cleans up even when groups array is empty', async () => {
+      mockExecFile.mockImplementation((_cmd: string, args: string[]) => {
+        if (args[0] === 'inspect' && args.length > 2) {
+          return dockerOk('/workspace:/host/workspace;');
+        }
+        if (args[0] === 'ps') return dockerOk('orphan-abc\n');
+        if (args[0] === 'rm') return dockerOk();
+        return dockerOk();
+      });
+
+      const { startupWarmUp } = await importRunner();
+      await startupWarmUp([]);
+
+      // Should still have called cleanup (docker ps + docker rm -f)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const rmCall = (mockExecFile.mock.calls as any[]).find(
+        (c) => c[1]?.[0] === 'rm' && c[1]?.includes('-f'),
+      );
+      expect(rmCall).toBeDefined();
+    });
   });
 
   // ── writeOpencodeConfig (tested via spawnContainer → warmUp) ────────────
@@ -564,18 +665,23 @@ describe('container-runner', () => {
         data: { 'sess-123': { type: 'idle' } },
       });
       mockClientSession.promptAsync.mockResolvedValue({ data: {} });
-      mockClientSession.messages.mockResolvedValue({
-        data: [
-          {
-            info: { role: 'user' },
-            parts: [{ type: 'text', text: 'Hello, world!' }],
-          },
-          {
-            info: { role: 'assistant' },
-            parts: [{ type: 'text', text: 'Hi there!' }],
-          },
-        ],
-      });
+      // messages() is called twice: once before prompt (pre-prompt snapshot)
+      // and once after prompt (to find the response).
+      // For a new session, pre-prompt returns empty, post-prompt returns the conversation.
+      mockClientSession.messages
+        .mockResolvedValueOnce({ data: [] })
+        .mockResolvedValue({
+          data: [
+            {
+              info: { id: 'msg-1', role: 'user' },
+              parts: [{ type: 'text', text: 'Hello, world!' }],
+            },
+            {
+              info: { id: 'msg-2', role: 'assistant' },
+              parts: [{ type: 'text', text: 'Hi there!' }],
+            },
+          ],
+        });
     }
 
     it('returns success with assistant text on happy path', async () => {
@@ -660,14 +766,17 @@ describe('container-runner', () => {
 
     it('returns error when no assistant message found', async () => {
       setupHappyPath();
-      mockClientSession.messages.mockResolvedValue({
-        data: [
-          {
-            info: { role: 'user' },
-            parts: [{ type: 'text', text: 'Hello' }],
-          },
-        ],
-      });
+      mockClientSession.messages
+        .mockReset()
+        .mockResolvedValueOnce({ data: [] })
+        .mockResolvedValue({
+          data: [
+            {
+              info: { id: 'msg-1', role: 'user' },
+              parts: [{ type: 'text', text: 'Hello' }],
+            },
+          ],
+        });
 
       const { runAgentSession } = await importRunner();
       const result = await runAgentSession(baseInput);
@@ -695,17 +804,21 @@ describe('container-runner', () => {
 
     it('returns error when assistant message has error info', async () => {
       setupHappyPath();
-      mockClientSession.messages.mockResolvedValue({
-        data: [
-          {
-            info: {
-              role: 'assistant',
-              error: { data: { message: 'Auth failed' } },
+      mockClientSession.messages
+        .mockReset()
+        .mockResolvedValueOnce({ data: [] })
+        .mockResolvedValue({
+          data: [
+            {
+              info: {
+                id: 'msg-err',
+                role: 'assistant',
+                error: { data: { message: 'Auth failed' } },
+              },
+              parts: [{ type: 'text', text: '' }],
             },
-            parts: [{ type: 'text', text: '' }],
-          },
-        ],
-      });
+          ],
+        });
 
       const { runAgentSession } = await importRunner();
       const result = await runAgentSession(baseInput);
@@ -718,20 +831,60 @@ describe('container-runner', () => {
 
     it('returns error when assistant text is empty', async () => {
       setupHappyPath();
-      mockClientSession.messages.mockResolvedValue({
-        data: [
-          {
-            info: { role: 'assistant' },
-            parts: [{ type: 'tool_use', text: undefined }],
-          },
-        ],
-      });
+      mockClientSession.messages
+        .mockReset()
+        .mockResolvedValueOnce({ data: [] })
+        .mockResolvedValue({
+          data: [
+            {
+              info: { id: 'msg-empty', role: 'assistant' },
+              parts: [{ type: 'tool_use', text: undefined }],
+            },
+          ],
+        });
 
       const { runAgentSession } = await importRunner();
       const result = await runAgentSession(baseInput);
 
       expect(result.status).toBe('error');
       expect(result.error).toBe('Empty response from OpenCode');
+
+      vi.unstubAllGlobals();
+    });
+
+    it('does not return a stale assistant message from a previous turn', async () => {
+      setupHappyPath();
+
+      // Simulate a session that already has a previous assistant message.
+      // Pre-prompt snapshot: the session has an old assistant message.
+      // Post-prompt: the session still only has the old messages (prompt failed/timed out).
+      const oldMessages = [
+        {
+          info: { id: 'old-user', role: 'user' },
+          parts: [{ type: 'text', text: 'previous question' }],
+        },
+        {
+          info: { id: 'old-assistant', role: 'assistant' },
+          parts: [
+            { type: 'text', text: 'previous answer — should NOT be returned' },
+          ],
+        },
+      ];
+
+      mockClientSession.messages
+        .mockReset()
+        // Pre-prompt snapshot: returns old conversation
+        .mockResolvedValueOnce({ data: oldMessages })
+        // Post-prompt: returns same old conversation (no new messages added)
+        .mockResolvedValue({ data: oldMessages });
+
+      const { runAgentSession } = await importRunner();
+      const result = await runAgentSession(baseInput);
+
+      // Should return error, NOT the old assistant message
+      expect(result.status).toBe('error');
+      expect(result.error).toBe('No assistant message from OpenCode');
+      expect(result.result).toBeNull();
 
       vi.unstubAllGlobals();
     });
