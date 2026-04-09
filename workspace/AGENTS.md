@@ -23,14 +23,14 @@ Read `/workspace/context.json` to find your identity:
 
 ## Important Paths
 
-- `/workspace/project/` — your working directory (read-write)
+- `/workspace/data/project/` — your working directory (read-write)
 - `/workspace/context.json` — your group context (read-only)
 - `/workspace/data/telegram/files/` — downloaded photos & documents (read-only)
 - `/workspace/skills/` — available skills — read `SKILL.md` in each folder
 
 ## Customization
 
-You can create these files in your working directory (`/workspace/project/`) to customize your environment:
+You can create these files in your working directory (`/workspace/data/project/`) to customize your environment:
 
 - `opencode.json` — override model settings, add MCP tools, change permissions
 - `AGENTS.md` — add your own persistent instructions
