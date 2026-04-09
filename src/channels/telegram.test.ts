@@ -5,6 +5,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 const {
   MockBot,
   mockApi,
+  mockStart,
   registerChannelSpy,
   mockCreateReadStream,
   mockMkdirSync,
@@ -18,21 +19,23 @@ const {
     sendChatAction: vi.fn().mockResolvedValue(true),
   };
 
+  const mockStart = vi
+    .fn()
+    .mockImplementation(
+      (opts?: {
+        onStart?: (info: { username: string; id: number }) => void;
+      }) => {
+        opts?.onStart?.({ username: 'test_bot', id: 12345 });
+        return Promise.resolve();
+      },
+    );
+
   class MockBot {
     api = mockApi;
     command = vi.fn();
     on = vi.fn();
     catch = vi.fn();
-    start = vi
-      .fn()
-      .mockImplementation(
-        (opts?: {
-          onStart?: (info: { username: string; id: number }) => void;
-        }) => {
-          opts?.onStart?.({ username: 'test_bot', id: 12345 });
-          return Promise.resolve();
-        },
-      );
+    start = mockStart;
     stop = vi.fn();
   }
 
@@ -52,6 +55,7 @@ const {
   return {
     MockBot,
     mockApi,
+    mockStart,
     registerChannelSpy,
     mockCreateReadStream,
     mockMkdirSync,
@@ -213,6 +217,34 @@ describe('TelegramChannel', () => {
 
       const bot = (ch as unknown as { bot: InstanceType<typeof MockBot> }).bot;
       expect(bot.catch).toHaveBeenCalledOnce();
+    });
+
+    it('rejects when bot.start() rejects (e.g. invalid token)', async () => {
+      // Override before connect creates the bot instance
+      mockStart.mockRejectedValueOnce(new Error('401: Unauthorized'));
+
+      const ch = new TelegramChannel(baseOpts);
+      await expect(ch.connect()).rejects.toThrow('401: Unauthorized');
+    });
+
+    it('rejects with timeout when onStart is never called', async () => {
+      vi.useFakeTimers();
+
+      // start() returns a promise that never resolves or rejects
+      mockStart.mockReturnValueOnce(new Promise(() => {}));
+
+      const ch = new TelegramChannel(baseOpts);
+      const connectPromise = ch.connect();
+
+      // Attach rejection handler BEFORE advancing timers to avoid unhandled rejection
+      const expectation = expect(connectPromise).rejects.toThrow('timed out');
+
+      // Advance past the 30s timeout
+      await vi.advanceTimersByTimeAsync(30_001);
+
+      await expectation;
+
+      vi.useRealTimers();
     });
   });
 

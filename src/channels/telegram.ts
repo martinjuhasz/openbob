@@ -381,15 +381,23 @@ export class TelegramChannel implements Channel {
     });
 
     // Start long-polling
-    return new Promise<void>((resolve) => {
+    return new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        reject(new Error('Telegram bot start timed out after 30s'));
+      }, 30_000);
+
       this.bot!.start({
         onStart: (botInfo) => {
+          clearTimeout(timeout);
           logger.info(
             { username: botInfo.username, id: botInfo.id },
             'Telegram bot connected',
           );
           resolve();
         },
+      }).catch((err: unknown) => {
+        clearTimeout(timeout);
+        reject(err);
       });
     });
   }
