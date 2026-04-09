@@ -1,7 +1,12 @@
 // openbob Host — Entry Point
 // Startup sequence: DB → CredentialProxy → IpcWatcher → TaskScheduler → Channels → Router
 
-import { ASSISTANT_NAME, POLL_INTERVAL, channelFromJid } from './config.js';
+import {
+  ASSISTANT_NAME,
+  POLL_INTERVAL,
+  channelFromJid,
+  isValidGroupFolder,
+} from './config.js';
 import './channels/index.js';
 import { loadEnv, getEnv } from './env.js';
 import {
@@ -302,11 +307,20 @@ function registerInitialGroupFromEnv(): void {
     return;
   }
 
+  const folder = process.env['INITIAL_GROUP_FOLDER'] ?? 'main';
+  if (!isValidGroupFolder(folder)) {
+    logger.error(
+      { folder },
+      'INITIAL_GROUP_FOLDER is invalid — must be a lowercase slug (a-z0-9._-)',
+    );
+    return;
+  }
+
   const isMain = process.env['INITIAL_GROUP_IS_MAIN'] !== 'false';
   const config: GroupConfig = {
     jid,
     name: 'Main',
-    folder: process.env['INITIAL_GROUP_FOLDER'] ?? 'main',
+    folder,
     trigger: process.env['INITIAL_GROUP_TRIGGER'] ?? ASSISTANT_NAME,
     channel: channelFromJid(jid),
     isMain,

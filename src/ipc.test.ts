@@ -365,6 +365,24 @@ describe('processTaskIpc', () => {
       expect(setRegisteredGroup).not.toHaveBeenCalled();
     });
 
+    it('blocks registration with invalid folder name', async () => {
+      const deps = makeDeps({});
+      await processTaskIpc(
+        {
+          type: 'register_group',
+          jid: 'mm:new',
+          name: 'New',
+          folder: '../../escape',
+          trigger: 'w',
+        },
+        'main-group',
+        true,
+        new Map(),
+        deps,
+      );
+      expect(setRegisteredGroup).not.toHaveBeenCalled();
+    });
+
     it('sets alwaysRespond from field', async () => {
       const deps = makeDeps({});
       await processTaskIpc(

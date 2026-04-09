@@ -22,3 +22,18 @@ export function channelFromJid(jid: string): string {
   };
   return prefixToChannel[prefix] ?? 'unknown';
 }
+
+/**
+ * Allowed pattern for group folder names.
+ * Must be a valid slug: lowercase alphanumeric, dots, hyphens, underscores.
+ * Must start with a letter or digit. Max 64 characters.
+ */
+const GROUP_FOLDER_PATTERN = /^[a-z0-9][a-z0-9._-]{0,63}$/;
+
+/**
+ * Validate a group folder name.
+ * Returns true if the name is a safe slug for use in filesystem paths and Docker names.
+ */
+export function isValidGroupFolder(folder: string): boolean {
+  return GROUP_FOLDER_PATTERN.test(folder);
+}

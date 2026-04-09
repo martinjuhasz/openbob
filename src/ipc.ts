@@ -6,7 +6,12 @@ import path from 'path';
 
 import { CronExpressionParser } from 'cron-parser';
 
-import { channelFromJid, GROUPS_DIR, POLL_INTERVAL } from './config.js';
+import {
+  channelFromJid,
+  GROUPS_DIR,
+  isValidGroupFolder,
+  POLL_INTERVAL,
+} from './config.js';
 import {
   deleteRegisteredGroup,
   deleteTask,
@@ -655,6 +660,13 @@ export async function processTaskIpc(
         logger.warn(
           { data, sourceGroup },
           'register_group: missing required fields (jid, name, folder, trigger)',
+        );
+        break;
+      }
+      if (!isValidGroupFolder(data.folder)) {
+        logger.warn(
+          { folder: data.folder, sourceGroup },
+          'register_group: invalid folder name',
         );
         break;
       }
