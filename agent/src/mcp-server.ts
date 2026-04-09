@@ -609,7 +609,7 @@ Get the channel JID from the user — format: "tg:<chat-id>" for Telegram or "mm
       folder: args.folder,
       trigger: args.trigger,
       alwaysRespond: args.always_respond ?? false,
-      ...(args.model !== undefined && { model: args.model }),
+      ...(args.model !== undefined && { model: args.model || null }),
       timestamp: new Date().toISOString(),
     });
     return {
@@ -675,7 +675,7 @@ Identify the group by its folder name. You can change any field including the JI
     if (args.trigger !== undefined) data.trigger = args.trigger;
     if (args.always_respond !== undefined)
       data.alwaysRespond = args.always_respond;
-    if (args.model !== undefined) data.model = args.model || undefined; // empty string → clear override
+    if (args.model !== undefined) data.model = args.model || null; // empty string → null → clear override
     writeIpcFile(TASKS_DIR, data);
     return {
       content: [{ type: 'text' as const, text: `Group update submitted.` }],

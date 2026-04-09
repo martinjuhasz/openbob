@@ -401,6 +401,48 @@ describe('processTaskIpc', () => {
       );
       expect(deps.registered[0]?.alwaysRespond).toBe(true);
     });
+
+    it('normalizes empty model string to null on register', async () => {
+      const deps = makeDeps({});
+      await processTaskIpc(
+        {
+          type: 'register_group',
+          jid: 'mm:new',
+          name: 'New',
+          folder: 'new',
+          trigger: 'w',
+          model: '',
+        },
+        'main-group',
+        true,
+        new Map(),
+        deps,
+      );
+      expect(setRegisteredGroup).toHaveBeenCalledOnce();
+      const stored = vi.mocked(setRegisteredGroup).mock.calls[0]?.[0];
+      expect(stored?.model).toBeNull();
+    });
+
+    it('preserves valid model string on register', async () => {
+      const deps = makeDeps({});
+      await processTaskIpc(
+        {
+          type: 'register_group',
+          jid: 'mm:new',
+          name: 'New',
+          folder: 'new',
+          trigger: 'w',
+          model: 'anthropic/claude-sonnet-4-6',
+        },
+        'main-group',
+        true,
+        new Map(),
+        deps,
+      );
+      expect(setRegisteredGroup).toHaveBeenCalledOnce();
+      const stored = vi.mocked(setRegisteredGroup).mock.calls[0]?.[0];
+      expect(stored?.model).toBe('anthropic/claude-sonnet-4-6');
+    });
   });
 
   describe('list_tasks', () => {
@@ -861,6 +903,69 @@ describe('processTaskIpc', () => {
       );
       expect(migrateGroupJid).toHaveBeenCalledWith('mm:old', 'tg:new');
       expect(setRegisteredGroup).not.toHaveBeenCalled();
+    });
+
+    it('clears model override when empty string is passed', async () => {
+      const existing = {
+        'mm:abc': makeGroup({
+          jid: 'mm:abc',
+          folder: 'grp',
+          model: 'anthropic/claude-sonnet-4-6',
+        }),
+      };
+      const deps = makeDeps(existing);
+      await processTaskIpc(
+        { type: 'update_group', folder: 'grp', model: '' },
+        'main-group',
+        true,
+        new Map(),
+        deps,
+      );
+      expect(setRegisteredGroup).toHaveBeenCalledOnce();
+      const stored = vi.mocked(setRegisteredGroup).mock.calls[0]?.[0];
+      expect(stored?.model).toBeNull();
+    });
+
+    it('clears model override when null is passed', async () => {
+      const existing = {
+        'mm:abc': makeGroup({
+          jid: 'mm:abc',
+          folder: 'grp',
+          model: 'anthropic/claude-sonnet-4-6',
+        }),
+      };
+      const deps = makeDeps(existing);
+      await processTaskIpc(
+        { type: 'update_group', folder: 'grp', model: null },
+        'main-group',
+        true,
+        new Map(),
+        deps,
+      );
+      expect(setRegisteredGroup).toHaveBeenCalledOnce();
+      const stored = vi.mocked(setRegisteredGroup).mock.calls[0]?.[0];
+      expect(stored?.model).toBeNull();
+    });
+
+    it('updates model override with a valid value', async () => {
+      const existing = {
+        'mm:abc': makeGroup({ jid: 'mm:abc', folder: 'grp' }),
+      };
+      const deps = makeDeps(existing);
+      await processTaskIpc(
+        {
+          type: 'update_group',
+          folder: 'grp',
+          model: 'openai/gpt-4o',
+        },
+        'main-group',
+        true,
+        new Map(),
+        deps,
+      );
+      expect(setRegisteredGroup).toHaveBeenCalledOnce();
+      const stored = vi.mocked(setRegisteredGroup).mock.calls[0]?.[0];
+      expect(stored?.model).toBe('openai/gpt-4o');
     });
   });
 

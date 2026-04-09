@@ -333,7 +333,7 @@ export async function processTaskIpc(
     trigger?: string;
     isMain?: boolean;
     alwaysRespond?: boolean;
-    model?: string;
+    model?: string | null;
   },
   sourceGroup: string,
   isMain: boolean,
@@ -698,7 +698,7 @@ export async function processTaskIpc(
         isMain: data.isMain === true,
         alwaysRespond: data.alwaysRespond === true || data.isMain === true,
         createdAt: Date.now(),
-        ...(data.model !== undefined && { model: data.model }),
+        ...(data.model !== undefined && { model: data.model || null }),
       };
       setRegisteredGroup(config);
       deps.onGroupRegistered(config);
@@ -804,7 +804,7 @@ export async function processTaskIpc(
           alwaysRespond: data.alwaysRespond,
         }),
         ...(data.isMain !== undefined && { isMain: data.isMain }),
-        ...(data.model !== undefined && { model: data.model }),
+        ...(data.model !== undefined && { model: data.model || null }),
       };
       // Only call setRegisteredGroup for non-jid changes (jid was already migrated above)
       if (!oldJid) {
