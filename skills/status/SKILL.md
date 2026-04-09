@@ -1,10 +1,9 @@
 # status
 
-When asked for system status, report:
+When asked for system status, gather and report:
 
-- Running Docker containers (openbob-host, openviking)
-- OpenViking health (GET http://openviking:1933/health)
-- Active sessions and scheduled tasks
-- Registered groups/channels
+- Registered groups/channels — use the `list_groups` MCP tool
+- Scheduled tasks and their status — use the `list_tasks` MCP tool
+- OpenViking health — run `curl -s http://openviking:1933/health` (may fail if OpenViking is not configured)
 
-Use `docker ps` and curl to gather this information.
+Present the results in a concise, readable summary.
