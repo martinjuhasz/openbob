@@ -42,29 +42,39 @@ export interface IpcDeps {
  * Translate a container-relative file path to the host-side path.
  * Agent containers mount `groups/<folder>/` as `/workspace/data/`, so
  * `/workspace/data/screenshot.png` → `GROUPS_DIR/<folder>/screenshot.png`.
- * HTTP(S) URLs and already-absolute host paths are returned unchanged.
+ * HTTP(S) URLs are returned unchanged.
+ * Returns null for any path that escapes the group directory or is not allowed.
  */
 const CONTAINER_DATA_PREFIX = '/workspace/data/';
 
 export function resolveContainerPath(
   source: string,
   groupFolder: string,
-): string {
+): string | null {
   if (source.startsWith('http://') || source.startsWith('https://')) {
     return source;
   }
-  if (source.startsWith(CONTAINER_DATA_PREFIX)) {
-    return path.join(
-      GROUPS_DIR,
-      groupFolder,
-      source.slice(CONTAINER_DATA_PREFIX.length),
-    );
+
+  const groupDir = path.resolve(GROUPS_DIR, groupFolder);
+
+  if (
+    source.startsWith(CONTAINER_DATA_PREFIX) ||
+    source === '/workspace/data'
+  ) {
+    const relative =
+      source === '/workspace/data'
+        ? ''
+        : source.slice(CONTAINER_DATA_PREFIX.length);
+    const resolved = path.resolve(groupDir, relative);
+    // Ensure the resolved path stays within the group directory
+    if (!resolved.startsWith(groupDir + path.sep) && resolved !== groupDir) {
+      return null;
+    }
+    return resolved;
   }
-  // Exact match for /workspace/data without trailing content
-  if (source === '/workspace/data') {
-    return path.join(GROUPS_DIR, groupFolder);
-  }
-  return source;
+
+  // All other paths (absolute host paths, relative paths, etc.) are rejected.
+  return null;
 }
 
 let ipcWatcherRunning = false;
@@ -148,16 +158,31 @@ export function startIpcWatcher(deps: IpcDeps): void {
                     data.source,
                     sourceGroup,
                   );
-                  await deps.sendPhoto(data.chatJid, hostSource, data.caption);
-                  logger.info(
-                    {
-                      chatJid: data.chatJid,
-                      source: data.source,
+                  if (!hostSource) {
+                    logger.warn(
+                      {
+                        chatJid: data.chatJid,
+                        source: data.source,
+                        sourceGroup,
+                      },
+                      'IPC send_photo blocked: path traversal rejected',
+                    );
+                  } else {
+                    await deps.sendPhoto(
+                      data.chatJid,
                       hostSource,
-                      sourceGroup,
-                    },
-                    'IPC photo sent',
-                  );
+                      data.caption,
+                    );
+                    logger.info(
+                      {
+                        chatJid: data.chatJid,
+                        source: data.source,
+                        hostSource,
+                        sourceGroup,
+                      },
+                      'IPC photo sent',
+                    );
+                  }
                 } else {
                   logger.warn(
                     { chatJid: data.chatJid, sourceGroup },
@@ -178,20 +203,31 @@ export function startIpcWatcher(deps: IpcDeps): void {
                     data.source,
                     sourceGroup,
                   );
-                  await deps.sendDocument(
-                    data.chatJid,
-                    hostSource,
-                    data.caption,
-                  );
-                  logger.info(
-                    {
-                      chatJid: data.chatJid,
-                      source: data.source,
+                  if (!hostSource) {
+                    logger.warn(
+                      {
+                        chatJid: data.chatJid,
+                        source: data.source,
+                        sourceGroup,
+                      },
+                      'IPC send_document blocked: path traversal rejected',
+                    );
+                  } else {
+                    await deps.sendDocument(
+                      data.chatJid,
                       hostSource,
-                      sourceGroup,
-                    },
-                    'IPC document sent',
-                  );
+                      data.caption,
+                    );
+                    logger.info(
+                      {
+                        chatJid: data.chatJid,
+                        source: data.source,
+                        hostSource,
+                        sourceGroup,
+                      },
+                      'IPC document sent',
+                    );
+                  }
                 } else {
                   logger.warn(
                     { chatJid: data.chatJid, sourceGroup },

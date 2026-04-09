@@ -1032,7 +1032,31 @@ describe('resolveContainerPath', () => {
     );
   });
 
-  it('returns non-container paths unchanged', () => {
-    expect(resolveContainerPath('/tmp/file.png', 'grp')).toBe('/tmp/file.png');
+  it('returns null for non-container absolute paths', () => {
+    expect(resolveContainerPath('/tmp/file.png', 'grp')).toBeNull();
+  });
+
+  it('returns null for path traversal via ../', () => {
+    expect(
+      resolveContainerPath('/workspace/data/../../etc/passwd', 'grp'),
+    ).toBeNull();
+  });
+
+  it('returns null for traversal escaping group dir', () => {
+    expect(
+      resolveContainerPath('/workspace/data/../other-group/secret.db', 'grp'),
+    ).toBeNull();
+  });
+
+  it('returns null for relative paths', () => {
+    expect(resolveContainerPath('relative/path.png', 'grp')).toBeNull();
+  });
+
+  it('allows deeply nested paths within group dir', () => {
+    const result = resolveContainerPath(
+      '/workspace/data/sub/dir/file.png',
+      'grp',
+    );
+    expect(result).toBe('/data/groups/grp/sub/dir/file.png');
   });
 });
