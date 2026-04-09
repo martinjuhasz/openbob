@@ -244,35 +244,6 @@ async function getOvCredentials(
   };
 }
 
-/**
- * Transform the XML prompt into a sender-prefixed format for OpenViking.
- * Input:  `<messages>\n<message sender="Alice" time="...">Hello</message>\n</messages>`
- * Output: `[Alice]: Hello`
- *
- * Falls back to the raw prompt if no XML message tags are found.
- */
-export function formatPromptForOv(prompt: string): string {
-  const messageRegex =
-    /<message\s+sender="([^"]*)"\s+time="[^"]*">([^<]*)<\/message>/g;
-  const lines: string[] = [];
-  let match;
-  while ((match = messageRegex.exec(prompt)) !== null) {
-    const sender = match[1]!
-      .replace(/&amp;/g, '&')
-      .replace(/&lt;/g, '<')
-      .replace(/&gt;/g, '>')
-      .replace(/&quot;/g, '"');
-    const content = match[2]!
-      .replace(/&amp;/g, '&')
-      .replace(/&lt;/g, '<')
-      .replace(/&gt;/g, '>')
-      .replace(/&quot;/g, '"');
-    lines.push(`[${sender}]: ${content}`);
-  }
-  if (lines.length === 0) return prompt;
-  return lines.join('\n');
-}
-
 // WORKSPACE_PATH: actual host path for /workspace inside this container.
 // Resolved by inspecting our own container's mount table at startup.
 // Falls back to env var WORKSPACE_PATH if set, or empty string (mounts skipped).
@@ -832,7 +803,6 @@ export async function runAgentSession(
     // OpenViking: recall relevant memories and inject into system prompt
     let ovSystem: string | undefined;
     const ovCreds = await getOvCredentials(groupFolder);
-    const ovPrompt = formatPromptForOv(prompt);
     if (ovCreds) {
       try {
         const sid = encodeURIComponent(sessionId);
@@ -850,7 +820,7 @@ export async function runAgentSession(
             'POST',
             {
               role: 'user',
-              content: ovPrompt,
+              content: prompt,
             },
             ovCreds.headers,
           ),
@@ -859,7 +829,7 @@ export async function runAgentSession(
             '/search/find',
             'POST',
             {
-              query: ovPrompt,
+              query: prompt,
               target_uri: `viking://user/${ovCreds.userId}/memories`,
               limit: 5,
               score_threshold: 0.1,

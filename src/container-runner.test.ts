@@ -968,48 +968,6 @@ describe('container-runner', () => {
   });
 });
 
-// ── formatPromptForOv ─────────────────────────────────────────────────────
-
-describe('formatPromptForOv', () => {
-  it('converts XML messages to sender-prefixed format', async () => {
-    const { formatPromptForOv } = await importRunner();
-    const xml = `<messages>
-<message sender="Alice" time="2026-01-01T10:00:00.000Z">Hello world</message>
-<message sender="Bob" time="2026-01-01T10:01:00.000Z">How are you?</message>
-</messages>`;
-    const result = formatPromptForOv(xml);
-    expect(result).toBe('[Alice]: Hello world\n[Bob]: How are you?');
-  });
-
-  it('returns raw prompt when no XML message tags found', async () => {
-    const { formatPromptForOv } = await importRunner();
-    const plain = 'Just a regular prompt without XML';
-    expect(formatPromptForOv(plain)).toBe(plain);
-  });
-
-  it('unescapes XML entities in sender names and content', async () => {
-    const { formatPromptForOv } = await importRunner();
-    const xml = `<messages>
-<message sender="O&apos;Brien &amp; Co" time="2026-01-01T10:00:00.000Z">Use &lt;tag&gt; &amp; &quot;quotes&quot;</message>
-</messages>`;
-    const result = formatPromptForOv(xml);
-    // Note: &apos; is not handled by our unescape (not in the regex), but &amp; &lt; &gt; &quot; are
-    expect(result).toContain('[O');
-    expect(result).toContain('& Co');
-    expect(result).toContain('<tag>');
-    expect(result).toContain('& "quotes"');
-  });
-
-  it('handles single message', async () => {
-    const { formatPromptForOv } = await importRunner();
-    const xml = `<messages>
-<message sender="Martin" time="2026-01-01T10:00:00.000Z">How was the API format?</message>
-</messages>`;
-    const result = formatPromptForOv(xml);
-    expect(result).toBe('[Martin]: How was the API format?');
-  });
-});
-
 // ── OpenViking scope integration ──────────────────────────────────────────
 
 describe('OpenViking scope', () => {
@@ -1116,8 +1074,7 @@ describe('OpenViking scope', () => {
     const { runAgentSession } = await importRunner();
     await runAgentSession({
       groupFolder: 'test-group',
-      prompt:
-        '<messages>\n<message sender="Alice" time="2026-01-01T10:00:00.000Z">Hello</message>\n</messages>',
+      prompt: '[Alice](2026-01-01T10:00:00.000Z): Hello',
       chatJid: 'mm:ch1',
       isMain: false,
       model: 'anthropic/claude-sonnet-4-6',
@@ -1168,8 +1125,7 @@ describe('OpenViking scope', () => {
     const { runAgentSession } = await importRunner();
     await runAgentSession({
       groupFolder: 'test-group',
-      prompt:
-        '<messages>\n<message sender="Bob" time="2026-01-01T10:00:00.000Z">Hi</message>\n</messages>',
+      prompt: '[Bob](2026-01-01T10:00:00.000Z): Hi',
       chatJid: 'mm:ch1',
       isMain: false,
       model: 'anthropic/claude-sonnet-4-6',
@@ -1279,8 +1235,7 @@ describe('OpenViking scope', () => {
     const { runAgentSession } = await importRunner();
     await runAgentSession({
       groupFolder: 'test-group',
-      prompt:
-        '<messages>\n<message sender="Martin" time="2026-01-01T10:00:00.000Z">How was the API?</message>\n</messages>',
+      prompt: '[Martin](2026-01-01T10:00:00.000Z): How was the API?',
       chatJid: 'mm:ch1',
       isMain: false,
       model: 'anthropic/claude-sonnet-4-6',
@@ -1299,7 +1254,9 @@ describe('OpenViking scope', () => {
       const body = JSON.parse((msgCalls[0]![1] as { body: string }).body) as {
         content: string;
       };
-      expect(body.content).toBe('[Martin]: How was the API?');
+      expect(body.content).toBe(
+        '[Martin](2026-01-01T10:00:00.000Z): How was the API?',
+      );
       expect(body.content).not.toContain('<message');
     }
 

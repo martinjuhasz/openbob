@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest';
 import {
-  escapeXml,
   formatMessages,
   stripInternalTags,
   formatOutbound,
@@ -36,30 +35,25 @@ function makeChannel(
   };
 }
 
-describe('escapeXml', () => {
-  it('escapes special chars', () => {
-    expect(escapeXml('<hello & "world">')).toBe(
-      '&lt;hello &amp; &quot;world&quot;&gt;',
+describe('formatMessages', () => {
+  it('formats messages as [sender](timestamp): content', () => {
+    const result = formatMessages([makeMessage('hello')]);
+    expect(result).toBe('[Alice](2026-01-01T00:00:00.000Z): hello');
+  });
+
+  it('joins multiple messages with newlines', () => {
+    const result = formatMessages([
+      makeMessage('hello', 'Alice'),
+      makeMessage('world', 'Bob'),
+    ]);
+    expect(result).toBe(
+      '[Alice](2026-01-01T00:00:00.000Z): hello\n[Bob](2026-01-01T00:00:00.000Z): world',
     );
   });
 
-  it('returns empty string for falsy input', () => {
-    expect(escapeXml('')).toBe('');
-  });
-});
-
-describe('formatMessages', () => {
-  it('wraps messages in XML', () => {
-    const result = formatMessages([makeMessage('hello')]);
-    expect(result).toContain('<messages>');
-    expect(result).toContain('sender="Alice"');
-    expect(result).toContain('hello');
-  });
-
-  it('escapes message content', () => {
-    const result = formatMessages([makeMessage('<script>')]);
-    expect(result).toContain('&lt;script&gt;');
-    expect(result).not.toContain('<script>');
+  it('preserves special characters in content', () => {
+    const result = formatMessages([makeMessage('<script> & "quotes"')]);
+    expect(result).toContain('<script> & "quotes"');
   });
 });
 

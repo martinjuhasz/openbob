@@ -1,20 +1,10 @@
 // Message router — formats messages, checks triggers, routes outbound
 import { Channel, NewMessage } from './types.js';
 
-export function escapeXml(s: string): string {
-  if (!s) return '';
-  return s
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-}
-
 export function formatMessages(messages: NewMessage[]): string {
-  const lines = messages.map((m) => {
-    return `<message sender="${escapeXml(m.sender_name)}" time="${escapeXml(m.timestamp)}">${escapeXml(m.content)}</message>`;
-  });
-  return `<messages>\n${lines.join('\n')}\n</messages>`;
+  return messages
+    .map((m) => `[${m.sender_name}](${m.timestamp}): ${m.content}`)
+    .join('\n');
 }
 
 export function stripInternalTags(text: string): string {
