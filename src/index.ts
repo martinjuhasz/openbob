@@ -513,6 +513,21 @@ async function main(): Promise<void> {
   // Start idle timeout checker (only active if IDLE_TIMEOUT is set)
   startIdleChecker();
 
+  // Notify main groups that the host is up and running
+  for (const group of Object.values(registeredGroups)) {
+    if (!group.isMain) continue;
+    const channel = findChannel(channels, group.jid);
+    if (!channel) continue;
+    channel
+      .sendMessage(group.jid, `✅ ${ASSISTANT_NAME} is up and running.`)
+      .catch((err) =>
+        logger.warn(
+          { jid: group.jid, err },
+          'Failed to send startup notification',
+        ),
+      );
+  }
+
   startMessageLoop().catch((err) => {
     logger.fatal({ err }, 'Message loop crashed');
     process.exit(1);
