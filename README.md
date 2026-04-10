@@ -4,7 +4,7 @@
 
 # openbob
 
-**An isolated agent runner for messaging platforms.** Each chat group gets its own sandboxed AI agent in a dedicated Docker container — with [OpenCode](https://opencode.ai) as the agent runtime and [OpenViking](https://github.com/volcengine/OpenViking) as persistent context memory.
+**An isolated agent runner for messaging platforms.** Inspired by [NanoClaw](https://github.com/qwibitai/nanoclaw) — each chat group gets its own sandboxed AI agent in a dedicated Docker container, with [OpenCode](https://opencode.ai) as the agent runtime and [OpenViking](https://github.com/volcengine/OpenViking) as persistent context memory.
 
 **~5,000 lines of TypeScript. That's the entire thing.** No framework maze, no abstraction layers — just a single Node.js process orchestrating Docker containers. Read it in an afternoon, fork it, make it yours.
 
@@ -20,21 +20,59 @@ Most agent setups share a single process, a single context window, and a single 
 
 ### How It Works
 
-openbob connects to your messaging platform (Telegram, Mattermost), watches for a trigger word, and routes each message to the right agent container:
+Here's what happens when someone sends `@openbob what did we decide about the API auth?` in a Telegram group:
 
 ```
-Messaging platform (Telegram / Mattermost)
-        │
-  Host (Node.js) — polls messages, detects triggers, routes to groups
-        │
-  Docker container (per group) — isolated sandbox, own workspace
-        │
-  OpenCode server — LLM agent loop, tool use, session persistence
-        │  (optional)
-  OpenViking — context database, semantic memory across sessions
-        │
-  Response via IPC → Host → Channel
+ ┌─ Telegram ──────────────────────────────────────────────────────────┐
+ │  User: "@openbob what did we decide about the API auth?"           │
+ └──────────────────────────────────┬──────────────────────────────────┘
+                                    │
+ ┌─ Host (Node.js) ────────────────▼──────────────────────────────────┐
+ │                                                                     │
+ │  1. Poll new messages from Telegram                                 │
+ │  2. Detect trigger word "@openbob" → route to group                 │
+ │  3. Queue message (per-group concurrency control)                   │
+ │                                                                     │
+ │  ┌─ OpenViking (optional) ────────────────────────────────────┐     │
+ │  │  4. Search memories for this prompt:                       │     │
+ │  │     POST /search/find → viking://user/<id>/memories        │     │
+ │  │     ← "In session #42, the team decided on JWT with        │     │
+ │  │        refresh tokens for API auth (2024-03-15)"           │     │
+ │  └────────────────────────────────────────────────────────────┘     │
+ │                                                                     │
+ │  5. Assemble prompt + inject recalled memories                      │
+ │  6. Send to agent container via OpenCode SDK                        │
+ │                                                                     │
+ └──────────────────────────────────┬──────────────────────────────────┘
+                                    │
+ ┌─ Docker Container (per group) ──▼──────────────────────────────────┐
+ │                                                                     │
+ │  7. OpenCode server (port 4096) receives prompt                     │
+ │  8. LLM agent loop: reasoning, tool calls, file access              │
+ │  9. Agent can call MCP tools (send_message, schedule_task, ...)     │
+ │     → writes JSON to /workspace/ipc/ → host picks up immediately    │
+ │                                                                     │
+ └──────────────────────────────────┬──────────────────────────────────┘
+                                    │
+ ┌─ Host ──────────────────────────▼──────────────────────────────────┐
+ │                                                                     │
+ │  10. Poll OpenCode session until complete                           │
+ │  11. Collect agent response                                         │
+ │                                                                     │
+ │  ┌─ OpenViking (optional) ────────────────────────────────────┐     │
+ │  │  12. Store conversation turn in session                    │     │
+ │  │  13. Commit session → OpenViking extracts new memories:    │     │
+ │  │      "Team decided on JWT + refresh tokens for API auth"   │     │
+ │  │      → viking://user/<id>/memories/api-decisions           │     │
+ │  └────────────────────────────────────────────────────────────┘     │
+ │                                                                     │
+ │  14. Format response, strip internal tags                           │
+ │  15. Send reply to Telegram                                         │
+ │                                                                     │
+ └─────────────────────────────────────────────────────────────────────┘
 ```
+
+The host manages all OpenViking communication — the agent itself doesn't need to know about it. Memories are recalled before each prompt and extracted after each response, so the agent gets smarter over time without any extra effort.
 
 ## Features
 
