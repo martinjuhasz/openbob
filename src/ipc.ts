@@ -19,6 +19,7 @@ import {
   getActiveTasks,
   getAllRegisteredGroups,
   getAllTasks,
+  getSession,
   getTaskById,
   getTasksForGroup,
   migrateGroupJid,
@@ -875,11 +876,19 @@ export async function processTaskIpc(
           'list_sessions: failed to query agent',
         );
       }
+      const activeSessionId = getSession(sourceGroup);
+      const sessionsWithActive = sessions.map((s) => ({
+        ...s,
+        active: s.id === activeSessionId,
+      }));
       const responseDir = path.join(GROUPS_DIR, sourceGroup, 'ipc', 'input');
       fs.mkdirSync(responseDir, { recursive: true });
       const responsePath = path.join(responseDir, `${data.requestId}.json`);
       const tempPath = `${responsePath}.tmp`;
-      fs.writeFileSync(tempPath, JSON.stringify({ sessions }));
+      fs.writeFileSync(
+        tempPath,
+        JSON.stringify({ sessions: sessionsWithActive }),
+      );
       fs.renameSync(tempPath, responsePath);
       logger.debug(
         { sourceGroup, requestId: data.requestId, count: sessions.length },

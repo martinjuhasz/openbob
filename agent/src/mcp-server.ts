@@ -803,6 +803,7 @@ Shows session IDs, titles, and creation timestamps. Use switch_session to change
             id: string;
             title?: string;
             created?: number;
+            active?: boolean;
           }>;
         };
         if (data.sessions.length === 0) {
@@ -814,8 +815,9 @@ Shows session IDs, titles, and creation timestamps. Use switch_session to change
           const created = s.created
             ? new Date(s.created).toISOString()
             : 'unknown';
+          const activeMarker = s.active ? ' ← active' : '';
           return [
-            `ID: ${s.id}`,
+            `ID: ${s.id}${activeMarker}`,
             `  Title: ${s.title ?? '(untitled)'}`,
             `  Created: ${created}`,
           ].join('\n');

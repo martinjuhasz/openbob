@@ -22,6 +22,7 @@ vi.mock('./db.js', () => ({
   setRegisteredGroup: vi.fn(),
   deleteSession: vi.fn(),
   setSession: vi.fn(),
+  getSession: vi.fn(() => null),
 }));
 
 // Mock the container-runner module
@@ -60,6 +61,7 @@ import {
   setRegisteredGroup,
   deleteSession,
   setSession,
+  getSession,
 } from './db.js';
 
 import { listAgentSessions, validateAgentSession } from './container-runner.js';
@@ -1172,12 +1174,13 @@ describe('processTaskIpc', () => {
   });
 
   describe('list_sessions', () => {
-    it('returns sessions from agent container', async () => {
+    it('returns sessions from agent container with active flag', async () => {
       const mockSessions = [
         { id: 'sess-1', title: 'First', created: 1000 },
         { id: 'sess-2', title: 'Second', created: 2000 },
       ];
       vi.mocked(listAgentSessions).mockResolvedValue(mockSessions);
+      vi.mocked(getSession).mockReturnValue('sess-2');
       const deps = makeDeps({});
       await processTaskIpc(
         { type: 'list_sessions', requestId: 'req-ls1' },
@@ -1187,13 +1190,20 @@ describe('processTaskIpc', () => {
         deps,
       );
       expect(listAgentSessions).toHaveBeenCalledWith('test-group');
+      expect(getSession).toHaveBeenCalledWith('test-group');
       expect(fs.writeFileSync).toHaveBeenCalledOnce();
       const writtenData = JSON.parse(
         vi.mocked(fs.writeFileSync).mock.calls[0]?.[1] as string,
       );
       expect(writtenData.sessions).toHaveLength(2);
-      expect(writtenData.sessions[0].id).toBe('sess-1');
-      expect(writtenData.sessions[1].id).toBe('sess-2');
+      expect(writtenData.sessions[0]).toMatchObject({
+        id: 'sess-1',
+        active: false,
+      });
+      expect(writtenData.sessions[1]).toMatchObject({
+        id: 'sess-2',
+        active: true,
+      });
     });
 
     it('returns empty array when agent query fails', async () => {
