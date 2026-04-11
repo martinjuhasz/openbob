@@ -113,14 +113,16 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     return true;
   }
 
-  const sinceTimestamp = lastAgentTimestamp[chatJid] || '';
-  const missedMessages = getMessagesSince(chatJid, sinceTimestamp);
+  let missedMessages = getMessagesSince(
+    chatJid,
+    lastAgentTimestamp[chatJid] || '',
+  );
 
   logger.debug(
     {
       chatJid,
       folder: group.folder,
-      sinceTimestamp,
+      sinceTimestamp: lastAgentTimestamp[chatJid] || '',
       missedCount: missedMessages.length,
       alwaysRespond: group.alwaysRespond,
     },
@@ -129,15 +131,26 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   if (missedMessages.length === 0) return true;
 
-  // Only respond to all messages if alwaysRespond is set; otherwise require trigger
+  // Only respond to all messages if alwaysRespond is set; otherwise require trigger.
+  // When the batch is full (limit reached) and contains no trigger, advance the
+  // cursor past these messages and fetch the next batch.  This prevents a backlog
+  // of non-trigger messages from permanently blocking trigger detection.
   if (!group.alwaysRespond) {
-    const hasTrigger = checkTrigger(missedMessages, group.trigger);
-    if (!hasTrigger) {
-      logger.debug(
-        { chatJid, trigger: group.trigger },
-        'processGroupMessages: no trigger word, skipping',
-      );
-      return true;
+    while (!checkTrigger(missedMessages, group.trigger)) {
+      // Advance cursor past this batch
+      lastAgentTimestamp[chatJid] =
+        missedMessages[missedMessages.length - 1].timestamp;
+      saveState();
+
+      // Try the next batch — there may be a trigger further ahead
+      missedMessages = getMessagesSince(chatJid, lastAgentTimestamp[chatJid]);
+      if (missedMessages.length === 0) {
+        logger.debug(
+          { chatJid, trigger: group.trigger },
+          'processGroupMessages: no trigger word found in any batch, skipping',
+        );
+        return true;
+      }
     }
   }
 
