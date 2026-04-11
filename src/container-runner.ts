@@ -474,6 +474,8 @@ async function spawnContainer(
     `OPENCODE_PORT=${OPENCODE_PORT}`,
     '-e',
     `GROUP_FOLDER=${groupFolder}`,
+    '-e',
+    `OPENBOB_MODEL=${model}`,
     // Enable built-in websearch tool (Exa AI — no API key required)
     '-e',
     'OPENCODE_ENABLE_EXA=1',

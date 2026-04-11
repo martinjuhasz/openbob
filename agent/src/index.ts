@@ -6,6 +6,7 @@ import { fileURLToPath } from 'url';
 import path from 'path';
 
 const PORT = parseInt(process.env['OPENCODE_PORT'] ?? '4096', 10);
+const MODEL = process.env['OPENBOB_MODEL'];
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const mcpServerPath = path.join(__dirname, 'mcp-server.js');
 
@@ -20,6 +21,7 @@ try {
     port: PORT,
     timeout: 60_000,
     config: {
+      ...(MODEL ? { model: MODEL } : {}),
       ...(process.env['OPENCODE_LOG_LEVEL']
         ? {
             logLevel: process.env['OPENCODE_LOG_LEVEL'] as
