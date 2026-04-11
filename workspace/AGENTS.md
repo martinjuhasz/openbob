@@ -71,6 +71,16 @@ You have built-in tools for all actions. Use them directly — do not write IPC 
 
 **cancel_task** / **pause_task** / **resume_task** — Manage tasks by `task_id`.
 
+### Session Management
+
+**reset_session** — Reset the current conversation session. Clears conversation history and starts fresh. Users can also type `/reset` in chat.
+
+**list_sessions** — List all available conversation sessions for this group. Shows session IDs, titles, and creation timestamps.
+
+**switch_session** — Switch to a different conversation session.
+
+- `session_id`: the session ID to switch to (from `list_sessions`)
+
 ### Group Management (main group only)
 
 **list_groups** — List all registered groups. Main group sees all; others see only their own.

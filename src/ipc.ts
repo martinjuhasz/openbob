@@ -14,6 +14,7 @@ import {
 } from './config.js';
 import {
   deleteRegisteredGroup,
+  deleteSession,
   deleteTask,
   getActiveTasks,
   getAllRegisteredGroups,
@@ -22,9 +23,11 @@ import {
   getTasksForGroup,
   migrateGroupJid,
   setRegisteredGroup,
+  setSession,
   updateTask,
   upsertTask,
 } from './db.js';
+import { listAgentSessions, validateAgentSession } from './container-runner.js';
 import { logger } from './logger.js';
 import { GroupConfig, ScheduledTask } from './types.js';
 
@@ -345,6 +348,8 @@ export async function processTaskIpc(
     isMain?: boolean;
     alwaysRespond?: boolean;
     model?: string | null;
+    // switch_session
+    sessionId?: string;
   },
   sourceGroup: string,
   isMain: boolean,
@@ -838,6 +843,100 @@ export async function processTaskIpc(
         },
         'Group updated via IPC',
       );
+      break;
+    }
+
+    case 'reset_session': {
+      if (!data.requestId) break;
+      deleteSession(sourceGroup);
+      const responseDir = path.join(GROUPS_DIR, sourceGroup, 'ipc', 'input');
+      fs.mkdirSync(responseDir, { recursive: true });
+      const responsePath = path.join(responseDir, `${data.requestId}.json`);
+      const tempPath = `${responsePath}.tmp`;
+      fs.writeFileSync(tempPath, JSON.stringify({ success: true }));
+      fs.renameSync(tempPath, responsePath);
+      logger.info({ sourceGroup }, 'Session reset via IPC');
+      break;
+    }
+
+    case 'list_sessions': {
+      if (!data.requestId) break;
+      let sessions: Array<{
+        id: string;
+        title?: string;
+        created?: number;
+      }> = [];
+      try {
+        sessions = await listAgentSessions(sourceGroup);
+        // eslint-disable-next-line no-catch-all/no-catch-all -- return empty list on failure
+      } catch (err) {
+        logger.warn(
+          { sourceGroup, err },
+          'list_sessions: failed to query agent',
+        );
+      }
+      const responseDir = path.join(GROUPS_DIR, sourceGroup, 'ipc', 'input');
+      fs.mkdirSync(responseDir, { recursive: true });
+      const responsePath = path.join(responseDir, `${data.requestId}.json`);
+      const tempPath = `${responsePath}.tmp`;
+      fs.writeFileSync(tempPath, JSON.stringify({ sessions }));
+      fs.renameSync(tempPath, responsePath);
+      logger.debug(
+        { sourceGroup, requestId: data.requestId, count: sessions.length },
+        'list_sessions response written',
+      );
+      break;
+    }
+
+    case 'switch_session': {
+      if (!data.requestId) break;
+      if (!data.sessionId) {
+        const responseDir = path.join(GROUPS_DIR, sourceGroup, 'ipc', 'input');
+        fs.mkdirSync(responseDir, { recursive: true });
+        const responsePath = path.join(responseDir, `${data.requestId}.json`);
+        const tempPath = `${responsePath}.tmp`;
+        fs.writeFileSync(
+          tempPath,
+          JSON.stringify({ success: false, error: 'missing sessionId' }),
+        );
+        fs.renameSync(tempPath, responsePath);
+        break;
+      }
+      let valid = false;
+      try {
+        valid = await validateAgentSession(sourceGroup, data.sessionId);
+        // eslint-disable-next-line no-catch-all/no-catch-all -- treat validation failure as invalid
+      } catch (err) {
+        logger.warn(
+          { sourceGroup, sessionId: data.sessionId, err },
+          'switch_session: validation failed',
+        );
+      }
+      const responseDir = path.join(GROUPS_DIR, sourceGroup, 'ipc', 'input');
+      fs.mkdirSync(responseDir, { recursive: true });
+      const responsePath = path.join(responseDir, `${data.requestId}.json`);
+      const tempPath = `${responsePath}.tmp`;
+      if (valid) {
+        setSession(sourceGroup, data.sessionId);
+        fs.writeFileSync(
+          tempPath,
+          JSON.stringify({ success: true, sessionId: data.sessionId }),
+        );
+        logger.info(
+          { sourceGroup, sessionId: data.sessionId },
+          'Session switched via IPC',
+        );
+      } else {
+        fs.writeFileSync(
+          tempPath,
+          JSON.stringify({ success: false, error: 'session not found' }),
+        );
+        logger.warn(
+          { sourceGroup, sessionId: data.sessionId },
+          'switch_session: session not found',
+        );
+      }
+      fs.renameSync(tempPath, responsePath);
       break;
     }
 

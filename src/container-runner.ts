@@ -685,6 +685,44 @@ export async function stopAllContainers(): Promise<void> {
 }
 
 /**
+ * List all sessions for a group's agent container via the OpenCode SDK.
+ * Returns an empty array if the container is not running.
+ */
+export async function listAgentSessions(
+  groupFolder: string,
+): Promise<Array<{ id: string; title?: string; created?: number }>> {
+  const name = activeContainers.get(groupFolder);
+  if (!name) return [];
+  const client = createOpencodeClient({
+    baseUrl: `http://${name}:${OPENCODE_PORT}`,
+  });
+  const res = await client.session.list();
+  return (res.data ?? []).map(
+    (s: { id: string; title?: string; time?: { created?: number } }) => ({
+      id: s.id,
+      title: s.title,
+      created: s.time?.created,
+    }),
+  );
+}
+
+/**
+ * Validate that a session exists in a group's agent container.
+ */
+export async function validateAgentSession(
+  groupFolder: string,
+  sessionId: string,
+): Promise<boolean> {
+  const name = activeContainers.get(groupFolder);
+  if (!name) return false;
+  const client = createOpencodeClient({
+    baseUrl: `http://${name}:${OPENCODE_PORT}`,
+  });
+  const res = await client.session.get({ path: { id: sessionId } });
+  return !!res.data;
+}
+
+/**
  * Run an agent session for a group: spawn container (or reuse), send prompt, return response.
  */
 export async function runAgentSession(

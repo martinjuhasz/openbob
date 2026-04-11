@@ -20,6 +20,14 @@ vi.mock('./db.js', () => ({
   deleteRegisteredGroup: vi.fn(),
   migrateGroupJid: vi.fn(() => true),
   setRegisteredGroup: vi.fn(),
+  deleteSession: vi.fn(),
+  setSession: vi.fn(),
+}));
+
+// Mock the container-runner module
+vi.mock('./container-runner.js', () => ({
+  listAgentSessions: vi.fn(async () => []),
+  validateAgentSession: vi.fn(async () => false),
 }));
 
 // Mock fs for list_tasks response file writing
@@ -50,7 +58,11 @@ import {
   deleteRegisteredGroup,
   migrateGroupJid,
   setRegisteredGroup,
+  deleteSession,
+  setSession,
 } from './db.js';
+
+import { listAgentSessions, validateAgentSession } from './container-runner.js';
 
 function makeGroup(overrides: Partial<GroupConfig> = {}): GroupConfig {
   return {
@@ -1122,6 +1134,195 @@ describe('processTaskIpc', () => {
         deps,
       );
       expect(deleteRegisteredGroup).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('reset_session', () => {
+    it('deletes session and writes success response', async () => {
+      const deps = makeDeps({});
+      await processTaskIpc(
+        { type: 'reset_session', requestId: 'req-rs1' },
+        'test-group',
+        false,
+        new Map(),
+        deps,
+      );
+      expect(deleteSession).toHaveBeenCalledWith('test-group');
+      expect(fs.mkdirSync).toHaveBeenCalled();
+      expect(fs.writeFileSync).toHaveBeenCalledOnce();
+      const writtenData = JSON.parse(
+        vi.mocked(fs.writeFileSync).mock.calls[0]?.[1] as string,
+      );
+      expect(writtenData.success).toBe(true);
+      expect(fs.renameSync).toHaveBeenCalledOnce();
+    });
+
+    it('skips when requestId is missing', async () => {
+      const deps = makeDeps({});
+      await processTaskIpc(
+        { type: 'reset_session' },
+        'test-group',
+        false,
+        new Map(),
+        deps,
+      );
+      expect(deleteSession).not.toHaveBeenCalled();
+      expect(fs.writeFileSync).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('list_sessions', () => {
+    it('returns sessions from agent container', async () => {
+      const mockSessions = [
+        { id: 'sess-1', title: 'First', created: 1000 },
+        { id: 'sess-2', title: 'Second', created: 2000 },
+      ];
+      vi.mocked(listAgentSessions).mockResolvedValue(mockSessions);
+      const deps = makeDeps({});
+      await processTaskIpc(
+        { type: 'list_sessions', requestId: 'req-ls1' },
+        'test-group',
+        false,
+        new Map(),
+        deps,
+      );
+      expect(listAgentSessions).toHaveBeenCalledWith('test-group');
+      expect(fs.writeFileSync).toHaveBeenCalledOnce();
+      const writtenData = JSON.parse(
+        vi.mocked(fs.writeFileSync).mock.calls[0]?.[1] as string,
+      );
+      expect(writtenData.sessions).toHaveLength(2);
+      expect(writtenData.sessions[0].id).toBe('sess-1');
+      expect(writtenData.sessions[1].id).toBe('sess-2');
+    });
+
+    it('returns empty array when agent query fails', async () => {
+      vi.mocked(listAgentSessions).mockRejectedValue(new Error('no container'));
+      const deps = makeDeps({});
+      await processTaskIpc(
+        { type: 'list_sessions', requestId: 'req-ls2' },
+        'test-group',
+        false,
+        new Map(),
+        deps,
+      );
+      expect(fs.writeFileSync).toHaveBeenCalledOnce();
+      const writtenData = JSON.parse(
+        vi.mocked(fs.writeFileSync).mock.calls[0]?.[1] as string,
+      );
+      expect(writtenData.sessions).toHaveLength(0);
+    });
+
+    it('skips when requestId is missing', async () => {
+      const deps = makeDeps({});
+      await processTaskIpc(
+        { type: 'list_sessions' },
+        'test-group',
+        false,
+        new Map(),
+        deps,
+      );
+      expect(listAgentSessions).not.toHaveBeenCalled();
+      expect(fs.writeFileSync).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('switch_session', () => {
+    it('switches to a valid session', async () => {
+      vi.mocked(validateAgentSession).mockResolvedValue(true);
+      const deps = makeDeps({});
+      await processTaskIpc(
+        { type: 'switch_session', requestId: 'req-sw1', sessionId: 'sess-1' },
+        'test-group',
+        false,
+        new Map(),
+        deps,
+      );
+      expect(validateAgentSession).toHaveBeenCalledWith('test-group', 'sess-1');
+      expect(setSession).toHaveBeenCalledWith('test-group', 'sess-1');
+      expect(fs.writeFileSync).toHaveBeenCalledOnce();
+      const writtenData = JSON.parse(
+        vi.mocked(fs.writeFileSync).mock.calls[0]?.[1] as string,
+      );
+      expect(writtenData.success).toBe(true);
+      expect(writtenData.sessionId).toBe('sess-1');
+    });
+
+    it('rejects switch to invalid session', async () => {
+      vi.mocked(validateAgentSession).mockResolvedValue(false);
+      const deps = makeDeps({});
+      await processTaskIpc(
+        {
+          type: 'switch_session',
+          requestId: 'req-sw2',
+          sessionId: 'nonexistent',
+        },
+        'test-group',
+        false,
+        new Map(),
+        deps,
+      );
+      expect(validateAgentSession).toHaveBeenCalledWith(
+        'test-group',
+        'nonexistent',
+      );
+      expect(setSession).not.toHaveBeenCalled();
+      const writtenData = JSON.parse(
+        vi.mocked(fs.writeFileSync).mock.calls[0]?.[1] as string,
+      );
+      expect(writtenData.success).toBe(false);
+      expect(writtenData.error).toBe('session not found');
+    });
+
+    it('returns error when sessionId is missing', async () => {
+      const deps = makeDeps({});
+      await processTaskIpc(
+        { type: 'switch_session', requestId: 'req-sw3' },
+        'test-group',
+        false,
+        new Map(),
+        deps,
+      );
+      expect(validateAgentSession).not.toHaveBeenCalled();
+      expect(setSession).not.toHaveBeenCalled();
+      const writtenData = JSON.parse(
+        vi.mocked(fs.writeFileSync).mock.calls[0]?.[1] as string,
+      );
+      expect(writtenData.success).toBe(false);
+      expect(writtenData.error).toBe('missing sessionId');
+    });
+
+    it('skips when requestId is missing', async () => {
+      const deps = makeDeps({});
+      await processTaskIpc(
+        { type: 'switch_session', sessionId: 'sess-1' },
+        'test-group',
+        false,
+        new Map(),
+        deps,
+      );
+      expect(validateAgentSession).not.toHaveBeenCalled();
+      expect(fs.writeFileSync).not.toHaveBeenCalled();
+    });
+
+    it('returns error when validation throws', async () => {
+      vi.mocked(validateAgentSession).mockRejectedValue(
+        new Error('container down'),
+      );
+      const deps = makeDeps({});
+      await processTaskIpc(
+        { type: 'switch_session', requestId: 'req-sw4', sessionId: 'sess-1' },
+        'test-group',
+        false,
+        new Map(),
+        deps,
+      );
+      expect(setSession).not.toHaveBeenCalled();
+      const writtenData = JSON.parse(
+        vi.mocked(fs.writeFileSync).mock.calls[0]?.[1] as string,
+      );
+      expect(writtenData.success).toBe(false);
+      expect(writtenData.error).toBe('session not found');
     });
   });
 });

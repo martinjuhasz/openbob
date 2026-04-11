@@ -718,5 +718,199 @@ server.tool(
   },
 );
 
+server.tool(
+  'reset_session',
+  `Reset the current conversation session. This clears the conversation history and starts fresh.
+The next message will create a new session with a clean context.
+Users can also type /reset in chat to trigger this directly.`,
+  {},
+  async () => {
+    const ctx = readContext();
+    const requestId = `req-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+    writeIpcFile(TASKS_DIR, {
+      type: 'reset_session',
+      requestId,
+      groupFolder: ctx.groupFolder,
+      timestamp: new Date().toISOString(),
+    });
+
+    // Poll for response from host
+    const responsePath = path.join(IPC_DIR, 'input', `${requestId}.json`);
+    const deadline = Date.now() + 10_000;
+    while (Date.now() < deadline) {
+      try {
+        const raw = fs.readFileSync(responsePath, 'utf-8');
+        fs.unlinkSync(responsePath);
+        const data = JSON.parse(raw) as { success: boolean };
+        if (data.success) {
+          return {
+            content: [
+              {
+                type: 'text' as const,
+                text: 'Session reset. The next message will start a fresh conversation.',
+              },
+            ],
+          };
+        }
+        return {
+          content: [
+            { type: 'text' as const, text: 'Failed to reset session.' },
+          ],
+          isError: true,
+        };
+      } catch {
+        await new Promise((r) => setTimeout(r, 250));
+      }
+    }
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: 'Timeout waiting for session reset confirmation.',
+        },
+      ],
+      isError: true,
+    };
+  },
+);
+
+server.tool(
+  'list_sessions',
+  `List all available conversation sessions for this group.
+Shows session IDs, titles, and creation timestamps. Use switch_session to change to a different session.`,
+  {},
+  async () => {
+    const ctx = readContext();
+    const requestId = `req-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+    writeIpcFile(TASKS_DIR, {
+      type: 'list_sessions',
+      requestId,
+      groupFolder: ctx.groupFolder,
+      timestamp: new Date().toISOString(),
+    });
+
+    // Poll for response from host
+    const responsePath = path.join(IPC_DIR, 'input', `${requestId}.json`);
+    const deadline = Date.now() + 10_000;
+    while (Date.now() < deadline) {
+      try {
+        const raw = fs.readFileSync(responsePath, 'utf-8');
+        fs.unlinkSync(responsePath);
+        const data = JSON.parse(raw) as {
+          sessions: Array<{
+            id: string;
+            title?: string;
+            created?: number;
+          }>;
+        };
+        if (data.sessions.length === 0) {
+          return {
+            content: [{ type: 'text' as const, text: 'No sessions found.' }],
+          };
+        }
+        const lines = data.sessions.map((s) => {
+          const created = s.created
+            ? new Date(s.created).toISOString()
+            : 'unknown';
+          return [
+            `ID: ${s.id}`,
+            `  Title: ${s.title ?? '(untitled)'}`,
+            `  Created: ${created}`,
+          ].join('\n');
+        });
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: `${data.sessions.length} session(s):\n\n${lines.join('\n\n')}`,
+            },
+          ],
+        };
+      } catch {
+        await new Promise((r) => setTimeout(r, 250));
+      }
+    }
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: 'Timeout waiting for session list from host.',
+        },
+      ],
+      isError: true,
+    };
+  },
+);
+
+server.tool(
+  'switch_session',
+  `Switch to a different conversation session by its ID. Use list_sessions to see available sessions.
+This restores the conversation history from that session.`,
+  {
+    session_id: z
+      .string()
+      .describe('The session ID to switch to (from list_sessions)'),
+  },
+  async (args: { session_id: string }) => {
+    const ctx = readContext();
+    const requestId = `req-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+    writeIpcFile(TASKS_DIR, {
+      type: 'switch_session',
+      requestId,
+      sessionId: args.session_id,
+      groupFolder: ctx.groupFolder,
+      timestamp: new Date().toISOString(),
+    });
+
+    // Poll for response from host
+    const responsePath = path.join(IPC_DIR, 'input', `${requestId}.json`);
+    const deadline = Date.now() + 10_000;
+    while (Date.now() < deadline) {
+      try {
+        const raw = fs.readFileSync(responsePath, 'utf-8');
+        fs.unlinkSync(responsePath);
+        const data = JSON.parse(raw) as {
+          success: boolean;
+          sessionId?: string;
+          error?: string;
+        };
+        if (data.success) {
+          return {
+            content: [
+              {
+                type: 'text' as const,
+                text: `Switched to session ${data.sessionId}. The next message will use this session's conversation history.`,
+              },
+            ],
+          };
+        }
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: `Failed to switch session: ${data.error ?? 'unknown error'}`,
+            },
+          ],
+          isError: true,
+        };
+      } catch {
+        await new Promise((r) => setTimeout(r, 250));
+      }
+    }
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: 'Timeout waiting for session switch confirmation.',
+        },
+      ],
+      isError: true,
+    };
+  },
+);
+
 const transport = new StdioServerTransport();
 await server.connect(transport);

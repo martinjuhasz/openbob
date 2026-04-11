@@ -155,6 +155,23 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     }
   }
 
+  // Handle /reset command — reset the session without involving the agent
+  if (
+    missedMessages.length === 1 &&
+    missedMessages[0].content.trim() === '/reset'
+  ) {
+    lastAgentTimestamp[chatJid] =
+      missedMessages[missedMessages.length - 1].timestamp;
+    saveState();
+    deleteSession(group.folder);
+    await channel.sendMessage(
+      chatJid,
+      '🔄 Session zurückgesetzt. Neuer Kontext.',
+    );
+    logger.info({ group: group.name }, '/reset: session cleared');
+    return true;
+  }
+
   const prompt = formatMessages(missedMessages);
   const previousCursor = lastAgentTimestamp[chatJid] || '';
   lastAgentTimestamp[chatJid] =
