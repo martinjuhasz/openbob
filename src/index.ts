@@ -33,6 +33,7 @@ import {
   setRegisteredGroup,
   setRouterState,
   setSession,
+  deleteSession,
   storeChatMetadata,
   storeMessage,
 } from './db.js';
@@ -510,8 +511,9 @@ async function main(): Promise<void> {
       if (oldModel !== newModel) {
         logger.info(
           { folder: config.folder, oldModel, newModel },
-          'Model changed — restarting agent container',
+          'Model changed — restarting agent container and resetting session',
         );
+        deleteSession(config.folder);
         stopGroupContainer(config.folder)
           .then(() =>
             warmUpContainers([{ folder: config.folder, model: newModel }]),

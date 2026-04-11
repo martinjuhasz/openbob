@@ -32,6 +32,7 @@ import {
   migrateGroupJid,
   getSession,
   setSession,
+  deleteSession,
   getRouterState,
   setRouterState,
   getActiveTasks,
@@ -392,6 +393,17 @@ describe('sessions', () => {
     setSession('dev', 'sess-old');
     setSession('dev', 'sess-new');
     expect(getSession('dev')).toBe('sess-new');
+  });
+
+  it('deletes session', () => {
+    setSession('dev', 'sess-abc');
+    expect(getSession('dev')).toBe('sess-abc');
+    deleteSession('dev');
+    expect(getSession('dev')).toBeNull();
+  });
+
+  it('deleteSession is a no-op for unknown group', () => {
+    expect(() => deleteSession('nonexistent')).not.toThrow();
   });
 });
 

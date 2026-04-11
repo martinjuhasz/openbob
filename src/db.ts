@@ -304,6 +304,10 @@ export function setSession(groupFolder: string, sessionId: string): void {
   ).run(groupFolder, sessionId);
 }
 
+export function deleteSession(groupFolder: string): void {
+  db.prepare(`DELETE FROM sessions WHERE group_folder = ?`).run(groupFolder);
+}
+
 // --- Router state ---
 
 export function getRouterState(key: string): string | null {
