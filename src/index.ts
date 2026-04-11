@@ -478,6 +478,9 @@ async function main(): Promise<void> {
       );
     },
     onGroupUpdated: (config, oldJid) => {
+      const previousConfig = oldJid
+        ? registeredGroups[oldJid]
+        : registeredGroups[config.jid];
       if (oldJid) {
         delete registeredGroups[oldJid];
       }
@@ -486,6 +489,27 @@ async function main(): Promise<void> {
         { jid: config.jid, name: config.name },
         'Group updated at runtime',
       );
+
+      // Stop and pre-warm container when the model changed so the agent
+      // picks up the new opencode.json on restart.
+      const oldModel = previousConfig?.model ?? getEnv().MODEL;
+      const newModel = config.model ?? getEnv().MODEL;
+      if (oldModel !== newModel) {
+        logger.info(
+          { folder: config.folder, oldModel, newModel },
+          'Model changed — restarting agent container',
+        );
+        stopGroupContainer(config.folder)
+          .then(() =>
+            warmUpContainers([{ folder: config.folder, model: newModel }]),
+          )
+          .catch((err) =>
+            logger.warn(
+              { folder: config.folder, err },
+              'Failed to restart container after model change',
+            ),
+          );
+      }
     },
     onGroupDeleted: (folder, jid) => {
       delete registeredGroups[jid];
