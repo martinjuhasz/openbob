@@ -637,17 +637,6 @@ async function getAgentContainer(
   const p = (async () => {
     const name = await spawnContainer(groupFolder, model);
     await waitForServer(name);
-    // Fetch agent debug logs after successful startup
-    const { stdout: debugOut, stderr: debugErr } = await execFileAsync(DOCKER, [
-      'logs',
-      name,
-    ]).catch(() => ({ stdout: '', stderr: '' }));
-    const debugLines = (debugOut + debugErr)
-      .split('\n')
-      .filter((l) => l.includes('[agent-debug]'));
-    if (debugLines.length > 0) {
-      logger.info({ groupFolder, debugLines }, 'Agent config debug output');
-    }
     return name;
   })().finally(() => spawnInProgress.delete(groupFolder));
 
