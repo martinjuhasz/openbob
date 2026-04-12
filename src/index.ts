@@ -137,7 +137,11 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   // cursor past these messages and fetch the next batch.  This prevents a backlog
   // of non-trigger messages from permanently blocking trigger detection.
   if (!group.alwaysRespond) {
-    while (!checkTrigger(missedMessages, group.trigger)) {
+    const batchHasAction = (msgs: NewMessage[]) =>
+      checkTrigger(msgs, group.trigger) ||
+      msgs.some((m) => m.content.trim() === '/reset');
+
+    while (!batchHasAction(missedMessages)) {
       // Advance cursor past this batch
       lastAgentTimestamp[chatJid] =
         missedMessages[missedMessages.length - 1].timestamp;
@@ -155,13 +159,13 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     }
   }
 
-  // Handle /reset command — reset the session without involving the agent
-  if (
-    missedMessages.length === 1 &&
-    missedMessages[0].content.trim() === '/reset'
-  ) {
-    lastAgentTimestamp[chatJid] =
-      missedMessages[missedMessages.length - 1].timestamp;
+  // Handle /reset command — reset the session without involving the agent.
+  // Check the most recent message so it works even when older messages are
+  // queued ahead of it. Placed after batch-skipping so /reset is found even
+  // when buried behind 50+ non-trigger messages.
+  const lastMsg = missedMessages[missedMessages.length - 1];
+  if (lastMsg.content.trim() === '/reset') {
+    lastAgentTimestamp[chatJid] = lastMsg.timestamp;
     saveState();
     deleteSession(group.folder);
     await channel.sendMessage(
@@ -297,10 +301,13 @@ async function startMessageLoop(): Promise<void> {
             const group = registeredGroups[chatJid];
             if (!group) continue;
 
-            // Only enqueue if alwaysRespond or trigger word present
+            // Only enqueue if alwaysRespond, trigger word, or /reset command
             if (!group.alwaysRespond) {
               const hasTrigger = checkTrigger(groupMessages, group.trigger);
-              if (!hasTrigger) continue;
+              const hasReset = groupMessages.some(
+                (m) => m.content.trim() === '/reset',
+              );
+              if (!hasTrigger && !hasReset) continue;
             }
 
             queue.enqueueMessageCheck(chatJid);
