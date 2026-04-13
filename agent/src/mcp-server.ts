@@ -10,6 +10,7 @@ import { z } from 'zod';
 import fs from 'fs';
 import path from 'path';
 import { CronExpressionParser } from 'cron-parser';
+import { fetchTranscript } from 'youtube-transcript-plus';
 
 const IPC_DIR = '/workspace/data/ipc';
 const MESSAGES_DIR = path.join(IPC_DIR, 'messages');
@@ -911,6 +912,79 @@ This restores the conversation history from that session.`,
       ],
       isError: true,
     };
+  },
+);
+
+server.tool(
+  'get_youtube_transcript',
+  `Fetch the transcript/subtitles of a YouTube video. Returns timestamped text segments.
+Works with most YouTube videos that have captions (manual or auto-generated).
+Use this to summarize videos, answer questions about video content, or extract information.
+Accepts full YouTube URLs (youtube.com, youtu.be) or plain video IDs.`,
+  {
+    url: z
+      .string()
+      .describe(
+        'YouTube video URL (e.g. "https://www.youtube.com/watch?v=dQw4w9WgXcQ", "https://youtu.be/dQw4w9WgXcQ") or video ID (e.g. "dQw4w9WgXcQ")',
+      ),
+    lang: z
+      .string()
+      .optional()
+      .describe(
+        'Language code for the transcript (e.g. "en", "de", "fr"). Defaults to the video\'s primary language.',
+      ),
+  },
+  async (args: { url: string; lang?: string }) => {
+    try {
+      const config: { lang?: string } = {};
+      if (args.lang) config.lang = args.lang;
+
+      const segments = await fetchTranscript(args.url, config);
+
+      if (!segments || segments.length === 0) {
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: 'No transcript segments found for this video.',
+            },
+          ],
+          isError: true,
+        };
+      }
+
+      // Format as timestamped transcript
+      const lines = segments.map((s: { text: string; offset: number }) => {
+        const totalSeconds = Math.floor(s.offset);
+        const hours = Math.floor(totalSeconds / 3600);
+        const minutes = Math.floor((totalSeconds % 3600) / 60);
+        const seconds = totalSeconds % 60;
+        const timestamp =
+          hours > 0
+            ? `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
+            : `${minutes}:${String(seconds).padStart(2, '0')}`;
+        return `[${timestamp}] ${s.text}`;
+      });
+
+      const header = `Transcript (${segments.length} segments, language: ${segments[0].lang ?? 'unknown'}):\n\n`;
+      return {
+        content: [{ type: 'text' as const, text: header + lines.join('\n') }],
+      };
+    } catch (err: unknown) {
+      const message =
+        err instanceof Error
+          ? err.message
+          : 'Unknown error fetching transcript';
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: `Failed to fetch transcript: ${message}`,
+          },
+        ],
+        isError: true,
+      };
+    }
   },
 );
 
