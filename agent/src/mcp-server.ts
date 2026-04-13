@@ -562,6 +562,19 @@ Get the channel JID from the user — format: "tg:<chat-id>" for Telegram or "mx
       .describe(
         'Channel JID, e.g. "tg:-1001234567890" or "mx:!abc123:matrix.org"',
       ),
+    name: z.string().describe('Display name for the group'),
+    folder: z
+      .string()
+      .describe('Short slug for workspace dir, no spaces, e.g. "homebase"'),
+    trigger: z
+      .string()
+      .describe('Word users type to address the bot, e.g. "Bob"'),
+    always_respond: z
+      .boolean()
+      .optional()
+      .describe(
+        'If true, bot responds to every message. If false (default), only when trigger word is present.',
+      ),
     model: z
       .string()
       .optional()
