@@ -420,12 +420,14 @@ async function spawnContainer(
   const projectDir = path.join(groupDir, 'project');
   const ipcDir = path.join(groupDir, 'ipc');
   const ipcTasksDir = path.join(ipcDir, 'tasks');
+  const ipcMessagesDir = path.join(ipcDir, 'messages');
   const ipcInputDir = path.join(ipcDir, 'input');
   const opencodeDir = path.join(groupDir, 'opencode');
   const telegramDir = path.join(groupDir, 'telegram');
   for (const dir of [
     projectDir,
     ipcTasksDir,
+    ipcMessagesDir,
     ipcInputDir,
     opencodeDir,
     telegramDir,
