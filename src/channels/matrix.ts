@@ -174,6 +174,24 @@ export class MatrixChannel implements Channel {
 
     this.onChatMetadata(jid, timestamp, roomName, 'matrix', isGroup);
 
+    // Bot commands — respond even in unregistered rooms (like Telegram's /chatid)
+    if (msgtype === MsgType.Text) {
+      const body = (content.body as string).trim();
+
+      if (body === '!roomid') {
+        await this.client?.sendNotice(
+          roomId,
+          `Room ID: \`${JID_PREFIX}${roomId}\``,
+        );
+        return;
+      }
+
+      if (body === '!ping') {
+        await this.client?.sendNotice(roomId, `${ASSISTANT_NAME} is online.`);
+        return;
+      }
+    }
+
     // Only deliver to registered groups
     const group = this.registeredGroups()[jid];
     if (!group) {
