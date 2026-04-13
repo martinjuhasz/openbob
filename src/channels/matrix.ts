@@ -177,6 +177,7 @@ export class MatrixChannel implements Channel {
     // Bot commands — respond even in unregistered rooms (like Telegram's /chatid)
     if (msgtype === MsgType.Text) {
       const body = (content.body as string).trim();
+      logger.debug({ jid, msgtype, body }, 'Matrix text message received');
 
       if (body === '!roomid') {
         await this.client?.sendNotice(
@@ -195,7 +196,10 @@ export class MatrixChannel implements Channel {
     // Only deliver to registered groups
     const group = this.registeredGroups()[jid];
     if (!group) {
-      logger.debug({ jid, roomName }, 'Message from unregistered Matrix room');
+      logger.debug(
+        { jid, roomName, msgtype },
+        'Message from unregistered Matrix room',
+      );
       return;
     }
 
