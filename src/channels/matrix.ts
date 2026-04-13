@@ -177,7 +177,6 @@ export class MatrixChannel implements Channel {
     // Bot commands — respond even in unregistered rooms (like Telegram's /chatid)
     if (msgtype === MsgType.Text) {
       const body = (content.body as string).trim();
-      logger.debug({ jid, msgtype, body }, 'Matrix text message received');
 
       if (body === '!roomid') {
         await this.client?.sendNotice(
@@ -502,6 +501,17 @@ export class MatrixChannel implements Channel {
       // eslint-disable-next-line no-catch-all/no-catch-all -- non-critical typing indicator
     } catch (err) {
       logger.debug({ jid, err }, 'Failed to send Matrix typing indicator');
+    }
+  }
+
+  async stopTyping(jid: string): Promise<void> {
+    if (!this.client) return;
+    try {
+      const roomId = jid.replace(JID_PREFIX, '');
+      await this.client.sendTyping(roomId, false, 0);
+      // eslint-disable-next-line no-catch-all/no-catch-all -- non-critical typing indicator
+    } catch (err) {
+      logger.debug({ jid, err }, 'Failed to stop Matrix typing indicator');
     }
   }
 }

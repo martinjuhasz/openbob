@@ -261,6 +261,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     );
   } finally {
     typingAc.abort();
+    await channel.stopTyping?.(chatJid).catch(() => {});
   }
 }
 

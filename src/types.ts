@@ -50,6 +50,7 @@ export interface Channel {
   isConnected(): boolean;
   ownsJid(jid: string): boolean;
   sendTyping?(jid: string): Promise<void>;
+  stopTyping?(jid: string): Promise<void>;
 }
 
 export interface SendOptions {
