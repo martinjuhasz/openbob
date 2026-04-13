@@ -7,8 +7,8 @@ describe('channelFromJid', () => {
     expect(channelFromJid('tg:-1001234567890')).toBe('telegram');
   });
 
-  it('maps mm: prefix to mattermost', () => {
-    expect(channelFromJid('mm:bsn8i7mwgbgej8cq3ppda7r98w')).toBe('mattermost');
+  it('maps mx: prefix to matrix', () => {
+    expect(channelFromJid('mx:!abc123:matrix.org')).toBe('matrix');
   });
 
   it('returns unknown for unrecognised prefix', () => {

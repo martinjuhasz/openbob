@@ -47,7 +47,7 @@ src/                     # Host — orchestrator
   db.ts                  # SQLite persistence
   env.ts                 # zod env validation
   types.ts               # shared type definitions
-  channels/              # channel adapters (telegram.ts, mattermost.ts, registry.ts)
+  channels/              # channel adapters (telegram.ts, matrix.ts, registry.ts)
 
 agent/                   # Agent — runs inside Docker containers
   src/index.ts           # OpenCode server on port 4096

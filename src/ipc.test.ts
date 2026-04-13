@@ -68,11 +68,11 @@ import { listAgentSessions, validateAgentSession } from './container-runner.js';
 
 function makeGroup(overrides: Partial<GroupConfig> = {}): GroupConfig {
   return {
-    jid: 'mm:abc',
+    jid: 'tg:abc',
     folder: 'test-group',
     name: 'Test Group',
     trigger: 'openbob',
-    channel: 'mattermost',
+    channel: 'telegram',
     isMain: false,
     alwaysRespond: false,
     createdAt: Date.now(),
@@ -136,10 +136,10 @@ describe('processTaskIpc', () => {
 
   it('schedules a cron task from main group', async () => {
     const groups = {
-      'mm:abc': makeGroup({ isMain: false, folder: 'test-group' }),
+      'tg:abc': makeGroup({ isMain: false, folder: 'test-group' }),
     };
     const deps = makeDeps(groups);
-    const folderToJid = new Map([['main-group', 'mm:abc']]);
+    const folderToJid = new Map([['main-group', 'tg:abc']]);
 
     await processTaskIpc(
       {
@@ -147,7 +147,7 @@ describe('processTaskIpc', () => {
         prompt: 'hello',
         scheduleType: 'cron',
         scheduleValue: '* * * * *',
-        targetJid: 'mm:abc',
+        targetJid: 'tg:abc',
       },
       'main-group',
       true, // isMain
@@ -161,13 +161,13 @@ describe('processTaskIpc', () => {
 
   it('blocks non-main group scheduling for another group', async () => {
     const groups = {
-      'mm:abc': makeGroup({ folder: 'group-a' }),
-      'mm:xyz': makeGroup({ jid: 'mm:xyz', folder: 'group-b' }),
+      'tg:abc': makeGroup({ folder: 'group-a' }),
+      'tg:xyz': makeGroup({ jid: 'tg:xyz', folder: 'group-b' }),
     };
     const deps = makeDeps(groups);
     const folderToJid = new Map<string, string>([
-      ['group-a', 'mm:abc'],
-      ['group-b', 'mm:xyz'],
+      ['group-a', 'tg:abc'],
+      ['group-b', 'tg:xyz'],
     ]);
 
     await processTaskIpc(
@@ -176,7 +176,7 @@ describe('processTaskIpc', () => {
         prompt: 'hello',
         scheduleType: 'interval',
         scheduleValue: '60000',
-        targetJid: 'mm:xyz', // targeting a different group
+        targetJid: 'tg:xyz', // targeting a different group
       },
       'group-a', // sourceGroup
       false, // not main
@@ -190,7 +190,7 @@ describe('processTaskIpc', () => {
   it('cancels a task from authorised group', async () => {
     const task = {
       id: 'task-1',
-      jid: 'mm:abc',
+      jid: 'tg:abc',
       group_folder: 'test-group',
       prompt: 'x',
       schedule_type: 'once' as const,
@@ -203,9 +203,9 @@ describe('processTaskIpc', () => {
     };
     vi.mocked(getActiveTasks).mockReturnValue([task]);
 
-    const groups = { 'mm:abc': makeGroup() };
+    const groups = { 'tg:abc': makeGroup() };
     const deps = makeDeps(groups);
-    const folderToJid = new Map([['test-group', 'mm:abc']]);
+    const folderToJid = new Map([['test-group', 'tg:abc']]);
 
     await processTaskIpc(
       { type: 'cancel_task', taskId: 'task-1' },
@@ -222,7 +222,7 @@ describe('processTaskIpc', () => {
   it('rejects cancel from unauthorized group', async () => {
     const task = {
       id: 'task-1',
-      jid: 'mm:abc',
+      jid: 'tg:abc',
       group_folder: 'other-group',
       prompt: 'x',
       schedule_type: 'once' as const,
@@ -235,9 +235,9 @@ describe('processTaskIpc', () => {
     };
     vi.mocked(getActiveTasks).mockReturnValue([task]);
 
-    const groups = { 'mm:abc': makeGroup() };
+    const groups = { 'tg:abc': makeGroup() };
     const deps = makeDeps(groups);
-    const folderToJid = new Map([['test-group', 'mm:abc']]);
+    const folderToJid = new Map([['test-group', 'tg:abc']]);
 
     await processTaskIpc(
       { type: 'cancel_task', taskId: 'task-1' },
@@ -269,7 +269,7 @@ describe('processTaskIpc', () => {
       await processTaskIpc(
         {
           type: 'register_group',
-          jid: 'mm:new',
+          jid: 'tg:new',
           name: 'New Group',
           folder: 'new-group',
           trigger: 'Bob',
@@ -282,10 +282,10 @@ describe('processTaskIpc', () => {
       expect(setRegisteredGroup).toHaveBeenCalledOnce();
       expect(deps.registered).toHaveLength(1);
       expect(deps.registered[0]).toMatchObject({
-        jid: 'mm:new',
+        jid: 'tg:new',
         name: 'New Group',
         folder: 'new-group',
-        channel: 'mattermost',
+        channel: 'telegram',
       });
     });
 
@@ -316,7 +316,7 @@ describe('processTaskIpc', () => {
       await processTaskIpc(
         {
           type: 'register_group',
-          jid: 'mm:new',
+          jid: 'tg:new',
           name: 'New',
           folder: 'new',
           trigger: 'Bob',
@@ -332,13 +332,13 @@ describe('processTaskIpc', () => {
 
     it('blocks registration of already-registered jid', async () => {
       const existing = {
-        'mm:existing': makeGroup({ jid: 'mm:existing', folder: 'existing' }),
+        'tg:existing': makeGroup({ jid: 'tg:existing', folder: 'existing' }),
       };
       const deps = makeDeps(existing);
       await processTaskIpc(
         {
           type: 'register_group',
-          jid: 'mm:existing',
+          jid: 'tg:existing',
           name: 'Dup',
           folder: 'dup',
           trigger: 'Bob',
@@ -353,13 +353,13 @@ describe('processTaskIpc', () => {
 
     it('blocks registration when folder already in use', async () => {
       const existing = {
-        'mm:other': makeGroup({ jid: 'mm:other', folder: 'taken' }),
+        'tg:other': makeGroup({ jid: 'tg:other', folder: 'taken' }),
       };
       const deps = makeDeps(existing);
       await processTaskIpc(
         {
           type: 'register_group',
-          jid: 'mm:new',
+          jid: 'tg:new',
           name: 'New',
           folder: 'taken',
           trigger: 'Bob',
@@ -375,7 +375,7 @@ describe('processTaskIpc', () => {
     it('blocks registration with missing fields', async () => {
       const deps = makeDeps({});
       await processTaskIpc(
-        { type: 'register_group', jid: 'mm:new' }, // missing name, folder, trigger
+        { type: 'register_group', jid: 'tg:new' }, // missing name, folder, trigger
         'main-group',
         true,
         new Map(),
@@ -389,7 +389,7 @@ describe('processTaskIpc', () => {
       await processTaskIpc(
         {
           type: 'register_group',
-          jid: 'mm:new',
+          jid: 'tg:new',
           name: 'New',
           folder: '../../escape',
           trigger: 'w',
@@ -407,7 +407,7 @@ describe('processTaskIpc', () => {
       await processTaskIpc(
         {
           type: 'register_group',
-          jid: 'mm:new',
+          jid: 'tg:new',
           name: 'New',
           folder: 'new',
           trigger: 'w',
@@ -426,7 +426,7 @@ describe('processTaskIpc', () => {
       await processTaskIpc(
         {
           type: 'register_group',
-          jid: 'mm:new',
+          jid: 'tg:new',
           name: 'New',
           folder: 'new',
           trigger: 'w',
@@ -447,7 +447,7 @@ describe('processTaskIpc', () => {
       await processTaskIpc(
         {
           type: 'register_group',
-          jid: 'mm:new',
+          jid: 'tg:new',
           name: 'New',
           folder: 'new',
           trigger: 'w',
@@ -467,7 +467,7 @@ describe('processTaskIpc', () => {
   describe('list_tasks', () => {
     const task1 = {
       id: 'task-1',
-      jid: 'mm:abc',
+      jid: 'tg:abc',
       group_folder: 'group-a',
       prompt: 'check health',
       schedule_type: 'cron' as const,
@@ -480,7 +480,7 @@ describe('processTaskIpc', () => {
     };
     const task2 = {
       id: 'task-2',
-      jid: 'mm:xyz',
+      jid: 'tg:xyz',
       group_folder: 'group-b',
       prompt: 'daily report',
       schedule_type: 'interval' as const,
@@ -557,7 +557,7 @@ describe('processTaskIpc', () => {
   describe('update_task', () => {
     const existingTask = {
       id: 'task-1',
-      jid: 'mm:abc',
+      jid: 'tg:abc',
       group_folder: 'group-a',
       prompt: 'original prompt',
       schedule_type: 'cron' as const,
@@ -823,7 +823,7 @@ describe('processTaskIpc', () => {
   describe('update_group', () => {
     it('updates trigger and alwaysRespond from main group', async () => {
       const existing = {
-        'mm:abc': makeGroup({ jid: 'mm:abc', folder: 'grp' }),
+        'tg:abc': makeGroup({ jid: 'tg:abc', folder: 'grp' }),
       };
       const deps = makeDeps(existing);
       await processTaskIpc(
@@ -846,7 +846,7 @@ describe('processTaskIpc', () => {
     });
 
     it('blocks update from non-main group', async () => {
-      const existing = { 'mm:abc': makeGroup({ folder: 'grp' }) };
+      const existing = { 'tg:abc': makeGroup({ folder: 'grp' }) };
       const deps = makeDeps(existing);
       await processTaskIpc(
         { type: 'update_group', folder: 'grp', alwaysRespond: true },
@@ -872,7 +872,7 @@ describe('processTaskIpc', () => {
 
     it('migrates jid when new jid is provided', async () => {
       const existing = {
-        'mm:old': makeGroup({ jid: 'mm:old', folder: 'grp' }),
+        'tg:old': makeGroup({ jid: 'tg:old', folder: 'grp' }),
       };
       const deps = makeDeps(existing);
       vi.mocked(migrateGroupJid).mockReturnValue(true);
@@ -883,21 +883,21 @@ describe('processTaskIpc', () => {
         new Map(),
         deps,
       );
-      expect(migrateGroupJid).toHaveBeenCalledWith('mm:old', 'tg:new');
+      expect(migrateGroupJid).toHaveBeenCalledWith('tg:old', 'tg:new');
       expect(setRegisteredGroup).toHaveBeenCalledOnce();
       expect(deps.updated[0]?.config.jid).toBe('tg:new');
       expect(deps.updated[0]?.config.channel).toBe('telegram');
-      expect(deps.updated[0]?.oldJid).toBe('mm:old');
+      expect(deps.updated[0]?.oldJid).toBe('tg:old');
     });
 
     it('blocks jid migration when new jid already in use', async () => {
       const existing = {
-        'mm:abc': makeGroup({ jid: 'mm:abc', folder: 'grp-a' }),
-        'mm:def': makeGroup({ jid: 'mm:def', folder: 'grp-b' }),
+        'tg:abc': makeGroup({ jid: 'tg:abc', folder: 'grp-a' }),
+        'tg:def': makeGroup({ jid: 'tg:def', folder: 'grp-b' }),
       };
       const deps = makeDeps(existing);
       await processTaskIpc(
-        { type: 'update_group', folder: 'grp-a', jid: 'mm:def' },
+        { type: 'update_group', folder: 'grp-a', jid: 'tg:def' },
         'main-group',
         true,
         new Map(),
@@ -909,7 +909,7 @@ describe('processTaskIpc', () => {
 
     it('blocks jid migration when migrateGroupJid fails', async () => {
       const existing = {
-        'mm:old': makeGroup({ jid: 'mm:old', folder: 'grp' }),
+        'tg:old': makeGroup({ jid: 'tg:old', folder: 'grp' }),
       };
       const deps = makeDeps(existing);
       vi.mocked(migrateGroupJid).mockReturnValue(false);
@@ -920,14 +920,14 @@ describe('processTaskIpc', () => {
         new Map(),
         deps,
       );
-      expect(migrateGroupJid).toHaveBeenCalledWith('mm:old', 'tg:new');
+      expect(migrateGroupJid).toHaveBeenCalledWith('tg:old', 'tg:new');
       expect(setRegisteredGroup).not.toHaveBeenCalled();
     });
 
     it('clears model override when empty string is passed', async () => {
       const existing = {
-        'mm:abc': makeGroup({
-          jid: 'mm:abc',
+        'tg:abc': makeGroup({
+          jid: 'tg:abc',
           folder: 'grp',
           model: 'anthropic/claude-sonnet-4-6',
         }),
@@ -947,8 +947,8 @@ describe('processTaskIpc', () => {
 
     it('clears model override when null is passed', async () => {
       const existing = {
-        'mm:abc': makeGroup({
-          jid: 'mm:abc',
+        'tg:abc': makeGroup({
+          jid: 'tg:abc',
           folder: 'grp',
           model: 'anthropic/claude-sonnet-4-6',
         }),
@@ -968,7 +968,7 @@ describe('processTaskIpc', () => {
 
     it('updates model override with a valid value', async () => {
       const existing = {
-        'mm:abc': makeGroup({ jid: 'mm:abc', folder: 'grp' }),
+        'tg:abc': makeGroup({ jid: 'tg:abc', folder: 'grp' }),
       };
       const deps = makeDeps(existing);
       await processTaskIpc(
@@ -991,8 +991,8 @@ describe('processTaskIpc', () => {
   describe('list_groups', () => {
     it('writes response with all groups for main group', async () => {
       const existing = {
-        'mm:abc': makeGroup({
-          jid: 'mm:abc',
+        'tg:abc': makeGroup({
+          jid: 'tg:abc',
           folder: 'admin',
           name: 'Admin',
           isMain: true,
@@ -1028,8 +1028,8 @@ describe('processTaskIpc', () => {
 
     it('filters to own group for non-main', async () => {
       const existing = {
-        'mm:abc': makeGroup({
-          jid: 'mm:abc',
+        'tg:abc': makeGroup({
+          jid: 'tg:abc',
           folder: 'admin',
           isMain: true,
         }),
@@ -1068,8 +1068,8 @@ describe('processTaskIpc', () => {
   describe('delete_group', () => {
     it('deletes a non-main group from main group', async () => {
       const existing = {
-        'mm:main': makeGroup({
-          jid: 'mm:main',
+        'tg:main': makeGroup({
+          jid: 'tg:main',
           folder: 'admin',
           isMain: true,
         }),
@@ -1109,8 +1109,8 @@ describe('processTaskIpc', () => {
 
     it('blocks deletion of the main group', async () => {
       const existing = {
-        'mm:main': makeGroup({
-          jid: 'mm:main',
+        'tg:main': makeGroup({
+          jid: 'tg:main',
           folder: 'admin',
           isMain: true,
         }),

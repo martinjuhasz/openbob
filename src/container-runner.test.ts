@@ -61,8 +61,6 @@ vi.mock('./db.js', () => ({
 
 vi.mock('./env.js', () => ({
   getEnv: vi.fn().mockReturnValue({
-    MATTERMOST_URL: 'https://mm.example.com',
-    MATTERMOST_TOKEN: 'token',
     MODEL: 'anthropic/claude-sonnet-4-6',
     AGENT_FORWARD_ENV: undefined,
   }),
@@ -516,8 +514,6 @@ describe('container-runner', () => {
     it('forwards env vars listed in AGENT_FORWARD_ENV', async () => {
       const { getEnv } = await import('./env.js');
       vi.mocked(getEnv).mockReturnValue({
-        MATTERMOST_URL: 'https://mm.example.com',
-        MATTERMOST_TOKEN: 'token',
         MODEL: 'anthropic/claude-sonnet-4-6',
         AGENT_FORWARD_ENV: 'MY_KEY,OTHER_KEY',
       } as ReturnType<typeof getEnv>);
@@ -633,7 +629,7 @@ describe('container-runner', () => {
     const baseInput = {
       groupFolder: 'test-group',
       prompt: 'Hello, world!',
-      chatJid: 'mm:channel-abc',
+      chatJid: 'tg:channel-abc',
       isMain: false,
       model: 'anthropic/claude-sonnet-4-6',
     };
@@ -704,7 +700,7 @@ describe('container-runner', () => {
       await runAgentSession(baseInput);
 
       expect(mockClientSession.create).toHaveBeenCalledWith({
-        body: { title: 'test-group/mm:channel-abc' },
+        body: { title: 'test-group/tg:channel-abc' },
       });
 
       vi.unstubAllGlobals();
@@ -726,7 +722,7 @@ describe('container-runner', () => {
       const contextCall = contextCalls[contextCalls.length - 1];
       expect(contextCall).toBeDefined();
       const ctx = JSON.parse(contextCall![1] as string);
-      expect(ctx.chatJid).toBe('mm:channel-abc');
+      expect(ctx.chatJid).toBe('tg:channel-abc');
       expect(ctx.groupFolder).toBe('test-group');
       expect(ctx.isMain).toBe(true);
 
@@ -1075,7 +1071,7 @@ describe('OpenViking scope', () => {
     await runAgentSession({
       groupFolder: 'test-group',
       prompt: '[Alice](2026-01-01T10:00:00.000Z): Hello',
-      chatJid: 'mm:ch1',
+      chatJid: 'tg:ch1',
       isMain: false,
       model: 'anthropic/claude-sonnet-4-6',
     });
@@ -1126,7 +1122,7 @@ describe('OpenViking scope', () => {
     await runAgentSession({
       groupFolder: 'test-group',
       prompt: '[Bob](2026-01-01T10:00:00.000Z): Hi',
-      chatJid: 'mm:ch1',
+      chatJid: 'tg:ch1',
       isMain: false,
       model: 'anthropic/claude-sonnet-4-6',
     });
@@ -1186,7 +1182,7 @@ describe('OpenViking scope', () => {
     await runAgentSession({
       groupFolder: 'new-group',
       prompt: 'Hello',
-      chatJid: 'mm:ch1',
+      chatJid: 'tg:ch1',
       isMain: false,
       model: 'anthropic/claude-sonnet-4-6',
     });
@@ -1236,7 +1232,7 @@ describe('OpenViking scope', () => {
     await runAgentSession({
       groupFolder: 'test-group',
       prompt: '[Martin](2026-01-01T10:00:00.000Z): How was the API?',
-      chatJid: 'mm:ch1',
+      chatJid: 'tg:ch1',
       isMain: false,
       model: 'anthropic/claude-sonnet-4-6',
     });
@@ -1290,7 +1286,7 @@ describe('OpenViking scope', () => {
     await runAgentSession({
       groupFolder: 'my-group',
       prompt: 'Hello',
-      chatJid: 'mm:ch1',
+      chatJid: 'tg:ch1',
       isMain: false,
       model: 'anthropic/claude-sonnet-4-6',
     });

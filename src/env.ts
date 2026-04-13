@@ -5,15 +5,22 @@ const emptyToUndefined = (v: unknown) =>
   typeof v === 'string' && v.trim() === '' ? undefined : v;
 
 const envSchema = z.object({
-  // Mattermost (optional — only needed if Mattermost channel is used)
-  MATTERMOST_URL: z.preprocess(emptyToUndefined, z.string().url().optional()),
-  MATTERMOST_TOKEN: z.preprocess(
+  // Telegram (optional — only needed if Telegram channel is used)
+  TELEGRAM_BOT_TOKEN: z.preprocess(
     emptyToUndefined,
     z.string().min(1).optional(),
   ),
 
-  // Telegram (optional — only needed if Telegram channel is used)
-  TELEGRAM_BOT_TOKEN: z.preprocess(
+  // Matrix (optional — only needed if Matrix channel is used)
+  MATRIX_HOMESERVER_URL: z.preprocess(
+    emptyToUndefined,
+    z.string().url().optional(),
+  ),
+  MATRIX_ACCESS_TOKEN: z.preprocess(
+    emptyToUndefined,
+    z.string().min(1).optional(),
+  ),
+  MATRIX_BOT_USER_ID: z.preprocess(
     emptyToUndefined,
     z.string().min(1).optional(),
   ),

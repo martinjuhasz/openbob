@@ -555,25 +555,12 @@ server.tool(
   `Register a new chat/group so the bot can respond to messages there. Main group only.
 
 The bot user must already be a member of the target channel/group.
-Get the channel JID from the user — format: "tg:<chat-id>" for Telegram or "mm:<channel-id>" for Mattermost.`,
+Get the channel JID from the user — format: "tg:<chat-id>" for Telegram or "mx:<room-id>" for Matrix.`,
   {
     jid: z
       .string()
       .describe(
-        'Channel JID, e.g. "tg:-1001234567890" or "mm:bsn8i7mwgbgej8cq3ppda7r98w"',
-      ),
-    name: z.string().describe('Display name for the group'),
-    folder: z
-      .string()
-      .describe('Short slug for workspace dir, no spaces, e.g. "homebase"'),
-    trigger: z
-      .string()
-      .describe('Word users type to address the bot, e.g. "Bob"'),
-    always_respond: z
-      .boolean()
-      .optional()
-      .describe(
-        'If true, bot responds to every message. If false (default), only when trigger word is present.',
+        'Channel JID, e.g. "tg:-1001234567890" or "mx:!abc123:matrix.org"',
       ),
     model: z
       .string()

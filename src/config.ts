@@ -18,7 +18,7 @@ export function channelFromJid(jid: string): string {
   const prefix = jid.slice(0, colonIndex);
   const prefixToChannel: Record<string, string> = {
     tg: 'telegram',
-    mm: 'mattermost',
+    mx: 'matrix',
   };
   return prefixToChannel[prefix] ?? 'unknown';
 }

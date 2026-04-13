@@ -37,7 +37,7 @@ vi.mock('./logger.js', () => ({
 function makeTask(overrides: Partial<ScheduledTask> = {}): ScheduledTask {
   return {
     id: 'task-1',
-    jid: 'mm:abc',
+    jid: 'tg:abc',
     group_folder: 'test-group',
     prompt: 'do something',
     schedule_type: 'interval',
@@ -54,12 +54,12 @@ function makeTask(overrides: Partial<ScheduledTask> = {}): ScheduledTask {
 function makeDeps(overrides: Partial<SchedulerDeps> = {}): SchedulerDeps {
   return {
     registeredGroups: () => ({
-      'mm:abc': {
-        jid: 'mm:abc',
+      'tg:abc': {
+        jid: 'tg:abc',
         name: 'Test Group',
         folder: 'test-group',
         trigger: '@bot',
-        channel: 'mattermost',
+        channel: 'telegram',
         isMain: false,
         alwaysRespond: false,
         createdAt: Date.now(),

@@ -12,11 +12,12 @@ services:
       - ./workspace:/workspace # AGENTS.md + base opencode.json template
       - ./skills:/skills:ro # Skills (read-only, mounted into agent containers)
     environment:
-      # Mattermost
-      - MATTERMOST_URL=${MATTERMOST_URL:-}
-      - MATTERMOST_TOKEN=${MATTERMOST_TOKEN:-}
       # Telegram
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+      # Matrix
+      - MATRIX_HOMESERVER_URL=${MATRIX_HOMESERVER_URL:-}
+      - MATRIX_ACCESS_TOKEN=${MATRIX_ACCESS_TOKEN:-}
+      - MATRIX_BOT_USER_ID=${MATRIX_BOT_USER_ID:-}
       # Model — format: providerID/modelID
       - MODEL=${MODEL:-anthropic/claude-sonnet-4-6}
       # Auth: provider API keys are read from ${DATA_PATH}/opencode/auth.json

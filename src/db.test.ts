@@ -54,11 +54,11 @@ beforeEach(() => {
 
 function makeGroup(overrides: Partial<GroupConfig> = {}): GroupConfig {
   return {
-    jid: 'mm:ch1',
+    jid: 'tg:ch1',
     name: 'Dev',
     folder: 'dev-group',
     trigger: '@bot',
-    channel: 'mattermost',
+    channel: 'telegram',
     isMain: false,
     alwaysRespond: false,
     createdAt: 1700000000000,
@@ -69,7 +69,7 @@ function makeGroup(overrides: Partial<GroupConfig> = {}): GroupConfig {
 function makeTask(overrides: Partial<ScheduledTask> = {}): ScheduledTask {
   return {
     id: 't1',
-    jid: 'mm:ch1',
+    jid: 'tg:ch1',
     group_folder: 'dev',
     prompt: 'do stuff',
     schedule_type: 'cron',
@@ -88,32 +88,32 @@ function makeTask(overrides: Partial<ScheduledTask> = {}): ScheduledTask {
 describe('storeMessage + getRecentMessages', () => {
   it('stores message and retrieves it', () => {
     storeChatMetadata(
-      'mm:ch1',
+      'tg:ch1',
       '2026-01-01T10:00:00.000Z',
       'General',
-      'mattermost',
+      'telegram',
       true,
     );
     storeMessage({
       id: 'm1',
-      chat_jid: 'mm:ch1',
+      chat_jid: 'tg:ch1',
       sender: 'u1',
       sender_name: 'Alice',
       content: 'hello',
       timestamp: '2026-01-01T10:00:00.000Z',
     });
 
-    const rows = getRecentMessages('mm:ch1');
+    const rows = getRecentMessages('tg:ch1');
     expect(rows).toHaveLength(1);
     expect(rows[0]?.content).toBe('hello');
     expect(rows[0]?.sender_name).toBe('Alice');
   });
 
   it('deduplicates messages with same id+chat_jid', () => {
-    storeChatMetadata('mm:ch1', '2026-01-01T10:00:00.000Z');
+    storeChatMetadata('tg:ch1', '2026-01-01T10:00:00.000Z');
     storeMessage({
       id: 'dup',
-      chat_jid: 'mm:ch1',
+      chat_jid: 'tg:ch1',
       sender: 'u1',
       sender_name: 'Alice',
       content: 'first',
@@ -121,24 +121,24 @@ describe('storeMessage + getRecentMessages', () => {
     });
     storeMessage({
       id: 'dup',
-      chat_jid: 'mm:ch1',
+      chat_jid: 'tg:ch1',
       sender: 'u1',
       sender_name: 'Alice',
       content: 'second',
       timestamp: '2026-01-01T10:01:00.000Z',
     });
 
-    const rows = getRecentMessages('mm:ch1');
+    const rows = getRecentMessages('tg:ch1');
     expect(rows).toHaveLength(1);
     expect(rows[0]?.content).toBe('first');
   });
 
   it('respects limit parameter', () => {
-    storeChatMetadata('mm:ch1', '2026-01-01T10:03:00.000Z');
+    storeChatMetadata('tg:ch1', '2026-01-01T10:03:00.000Z');
     for (let i = 0; i < 5; i++) {
       storeMessage({
         id: `m${i}`,
-        chat_jid: 'mm:ch1',
+        chat_jid: 'tg:ch1',
         sender: 'u1',
         sender_name: 'Alice',
         content: `msg-${i}`,
@@ -146,7 +146,7 @@ describe('storeMessage + getRecentMessages', () => {
       });
     }
 
-    const rows = getRecentMessages('mm:ch1', 3);
+    const rows = getRecentMessages('tg:ch1', 3);
     expect(rows).toHaveLength(3);
     // Should return the 3 most recent, in chronological order
     expect(rows[0]?.content).toBe('msg-2');
@@ -156,10 +156,10 @@ describe('storeMessage + getRecentMessages', () => {
 
 describe('getMessagesSince', () => {
   it('retrieves messages since a given timestamp', () => {
-    storeChatMetadata('mm:ch1', '2026-01-01T10:02:00.000Z');
+    storeChatMetadata('tg:ch1', '2026-01-01T10:02:00.000Z');
     storeMessage({
       id: 'm1',
-      chat_jid: 'mm:ch1',
+      chat_jid: 'tg:ch1',
       sender: 'u1',
       sender_name: 'Alice',
       content: 'old',
@@ -167,7 +167,7 @@ describe('getMessagesSince', () => {
     });
     storeMessage({
       id: 'm2',
-      chat_jid: 'mm:ch1',
+      chat_jid: 'tg:ch1',
       sender: 'u1',
       sender_name: 'Alice',
       content: 'new',
@@ -175,25 +175,25 @@ describe('getMessagesSince', () => {
     });
     storeMessage({
       id: 'm3',
-      chat_jid: 'mm:ch1',
+      chat_jid: 'tg:ch1',
       sender: 'u1',
       sender_name: 'Alice',
       content: 'newer',
       timestamp: '2026-01-01T10:01:00.000Z',
     });
 
-    const rows = getMessagesSince('mm:ch1', '2026-01-01T09:30:00.000Z');
+    const rows = getMessagesSince('tg:ch1', '2026-01-01T09:30:00.000Z');
     expect(rows).toHaveLength(2);
     expect(rows[0]?.content).toBe('new');
     expect(rows[1]?.content).toBe('newer');
   });
 
   it('respects limit parameter', () => {
-    storeChatMetadata('mm:ch1', '2026-01-01T10:05:00.000Z');
+    storeChatMetadata('tg:ch1', '2026-01-01T10:05:00.000Z');
     for (let i = 0; i < 5; i++) {
       storeMessage({
         id: `m${i}`,
-        chat_jid: 'mm:ch1',
+        chat_jid: 'tg:ch1',
         sender: 'u1',
         sender_name: 'Alice',
         content: `msg-${i}`,
@@ -201,18 +201,18 @@ describe('getMessagesSince', () => {
       });
     }
 
-    const rows = getMessagesSince('mm:ch1', '2026-01-01T09:00:00.000Z', 2);
+    const rows = getMessagesSince('tg:ch1', '2026-01-01T09:00:00.000Z', 2);
     expect(rows).toHaveLength(2);
   });
 });
 
 describe('getNewMessages', () => {
   it('returns messages across all chats since timestamp', () => {
-    storeChatMetadata('mm:ch1', '2026-01-01T10:00:00.000Z');
-    storeChatMetadata('mm:ch2', '2026-01-01T10:01:00.000Z');
+    storeChatMetadata('tg:ch1', '2026-01-01T10:00:00.000Z');
+    storeChatMetadata('tg:ch2', '2026-01-01T10:01:00.000Z');
     storeMessage({
       id: 'm1',
-      chat_jid: 'mm:ch1',
+      chat_jid: 'tg:ch1',
       sender: 'u1',
       sender_name: 'Alice',
       content: 'old',
@@ -220,7 +220,7 @@ describe('getNewMessages', () => {
     });
     storeMessage({
       id: 'm2',
-      chat_jid: 'mm:ch1',
+      chat_jid: 'tg:ch1',
       sender: 'u1',
       sender_name: 'Alice',
       content: 'new-ch1',
@@ -228,7 +228,7 @@ describe('getNewMessages', () => {
     });
     storeMessage({
       id: 'm3',
-      chat_jid: 'mm:ch2',
+      chat_jid: 'tg:ch2',
       sender: 'u2',
       sender_name: 'Bob',
       content: 'new-ch2',
@@ -247,44 +247,44 @@ describe('getNewMessages', () => {
 describe('storeChatMetadata', () => {
   it('creates chat entry', () => {
     storeChatMetadata(
-      'mm:ch99',
+      'tg:ch99',
       '2026-01-01T10:00:00.000Z',
       'TestChannel',
-      'mattermost',
+      'telegram',
       true,
     );
     // Verify via messages — store a message then retrieve it to confirm chat exists
     storeMessage({
       id: 'verify',
-      chat_jid: 'mm:ch99',
+      chat_jid: 'tg:ch99',
       sender: 'u1',
       sender_name: 'User',
       content: 'test',
       timestamp: '2026-01-01T10:00:00.000Z',
     });
-    const msgs = getRecentMessages('mm:ch99');
+    const msgs = getRecentMessages('tg:ch99');
     expect(msgs).toHaveLength(1);
   });
 
   it('upserts: preserves existing name on re-insert without name', () => {
     storeChatMetadata(
-      'mm:ch99',
+      'tg:ch99',
       '2026-01-01T10:00:00.000Z',
       'OriginalName',
-      'mattermost',
+      'telegram',
       true,
     );
-    storeChatMetadata('mm:ch99', '2026-01-01T11:00:00.000Z'); // no name
+    storeChatMetadata('tg:ch99', '2026-01-01T11:00:00.000Z'); // no name
     // Chat should still exist
     storeMessage({
       id: 'verify',
-      chat_jid: 'mm:ch99',
+      chat_jid: 'tg:ch99',
       sender: 'u1',
       sender_name: 'User',
       content: 'test',
       timestamp: '2026-01-01T11:00:00.000Z',
     });
-    const msgs = getRecentMessages('mm:ch99');
+    const msgs = getRecentMessages('tg:ch99');
     expect(msgs).toHaveLength(1);
   });
 });
@@ -298,19 +298,19 @@ describe('registered groups', () => {
 
     const all = getAllRegisteredGroups();
     expect(Object.keys(all)).toHaveLength(1);
-    expect(all['mm:ch1']).toBeDefined();
-    expect(all['mm:ch1']?.name).toBe('Dev');
-    expect(all['mm:ch1']?.folder).toBe('dev-group');
-    expect(all['mm:ch1']?.isMain).toBe(false);
+    expect(all['tg:ch1']).toBeDefined();
+    expect(all['tg:ch1']?.name).toBe('Dev');
+    expect(all['tg:ch1']?.folder).toBe('dev-group');
+    expect(all['tg:ch1']?.isMain).toBe(false);
   });
 
   it('main group flag', () => {
     setRegisteredGroup(
-      makeGroup({ jid: 'mm:main', folder: 'main', isMain: true }),
+      makeGroup({ jid: 'tg:main', folder: 'main', isMain: true }),
     );
 
     const all = getAllRegisteredGroups();
-    expect(all['mm:main']?.isMain).toBe(true);
+    expect(all['tg:main']?.isMain).toBe(true);
   });
 
   it('upserts group config on same jid', () => {
@@ -318,12 +318,12 @@ describe('registered groups', () => {
     setRegisteredGroup(makeGroup({ name: 'NewName' }));
 
     const all = getAllRegisteredGroups();
-    expect(all['mm:ch1']?.name).toBe('NewName');
+    expect(all['tg:ch1']?.name).toBe('NewName');
   });
 
   it('deleteRegisteredGroup removes a group', () => {
     setRegisteredGroup(makeGroup());
-    deleteRegisteredGroup('mm:ch1');
+    deleteRegisteredGroup('tg:ch1');
 
     const all = getAllRegisteredGroups();
     expect(Object.keys(all)).toHaveLength(0);
@@ -333,21 +333,21 @@ describe('registered groups', () => {
     setRegisteredGroup(makeGroup());
 
     const all = getAllRegisteredGroups();
-    expect(all['mm:ch1']?.model).toBeUndefined();
+    expect(all['tg:ch1']?.model).toBeUndefined();
   });
 
   it('model is preserved when set', () => {
     setRegisteredGroup(makeGroup({ model: 'anthropic/claude-sonnet-4-6' }));
 
     const all = getAllRegisteredGroups();
-    expect(all['mm:ch1']?.model).toBe('anthropic/claude-sonnet-4-6');
+    expect(all['tg:ch1']?.model).toBe('anthropic/claude-sonnet-4-6');
   });
 
   it('alwaysRespond flag round-trips', () => {
     setRegisteredGroup(makeGroup({ alwaysRespond: true }));
 
     const all = getAllRegisteredGroups();
-    expect(all['mm:ch1']?.alwaysRespond).toBe(true);
+    expect(all['tg:ch1']?.alwaysRespond).toBe(true);
   });
 });
 

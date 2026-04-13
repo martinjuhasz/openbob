@@ -76,7 +76,7 @@ The host manages all OpenViking communication — the agent itself doesn't need 
 
 ## Features
 
-- **Multi-channel messaging** — Supports Telegram and Mattermost. Architecture is extensible via channel registry.
+- **Multi-channel messaging** — Supports Telegram and Matrix. Architecture is extensible via channel registry.
 - **Isolated group context** — Each group gets its own Docker container, workspace, `opencode.json` config, and session history.
 - **Main channel** — A privileged admin channel that can register new groups and manage the system.
 - **Scheduled tasks** — Cron, interval, or one-shot tasks that spin up the agent and can message results back.
@@ -91,7 +91,7 @@ The host manages all OpenViking communication — the agent itself doesn't need 
 ### Prerequisites
 
 - Docker + Docker Compose
-- A messaging platform: **Telegram bot** (token from [@BotFather](https://t.me/BotFather)) or **Mattermost** instance with a bot account
+- A messaging platform: **Telegram bot** (token from [@BotFather](https://t.me/BotFather)) or **Matrix** homeserver with a bot account
 - LLM provider credentials — openbob uses OpenCode's `auth.json` file (see [Authentication](#authentication))
 
 ### Setup
@@ -111,26 +111,26 @@ DATA_PATH=/opt/openbob/data
 # LLM model — format: providerID/modelID
 MODEL=anthropic/claude-sonnet-4-6
 
-# --- Channel: pick Telegram OR Mattermost (or both) ---
+# --- Channel: pick Telegram OR Matrix (or both) ---
 
 # Telegram
 TELEGRAM_BOT_TOKEN=your-bot-token
 
-# Mattermost
-MATTERMOST_URL=https://your-mattermost.com
-MATTERMOST_TOKEN=your-bot-token
+# Matrix
+# MATRIX_HOMESERVER_URL=https://matrix.example.com
+# MATRIX_ACCESS_TOKEN=your-access-token
 ```
 
 ### Initial Channel Setup
 
-On first run, openbob needs at least one registered group to monitor. Set the `INITIAL_GROUP_*` env vars to bootstrap it — the channel type is detected automatically from the JID prefix (`tg:` → Telegram, `mm:` → Mattermost).
+On first run, openbob needs at least one registered group to monitor. Set the `INITIAL_GROUP_*` env vars to bootstrap it — the channel type is detected automatically from the JID prefix (`tg:` → Telegram, `mx:` → Matrix).
 
 **Step 1: Get your Chat ID**
 
 Start openbob with the channel credentials set (e.g. `TELEGRAM_BOT_TOKEN`). Then:
 
 - **Telegram**: Send `/chatid` to your bot in the target chat. It replies with the JID, e.g. `tg:-1001234567890`.
-- **Mattermost**: The channel ID is visible in the channel URL or via the Mattermost API. Prefix it: `mm:your-channel-id`.
+- **Matrix**: Use the room ID from your Matrix client (visible in room settings). Prefix it: `mx:!roomid:server`.
 
 **Step 2: Configure the initial group**
 
@@ -141,8 +141,8 @@ Add to your `.env`:
 INITIAL_GROUP_JID=tg:-1001234567890
 INITIAL_GROUP_TRIGGER=openbob
 
-# Mattermost example
-# INITIAL_GROUP_JID=mm:your-channel-id
+# Matrix example
+# INITIAL_GROUP_JID=mx:!roomid:matrix.org
 # INITIAL_GROUP_TRIGGER=openbob
 ```
 
@@ -208,19 +208,19 @@ The agent will spin up a container, process the message, and respond in the chan
 
 Single Node.js process that orchestrates everything:
 
-| File                     | Purpose                                               |
-| ------------------------ | ----------------------------------------------------- |
-| `index.ts`               | Main loop — startup, polling, message dispatch        |
-| `container-runner.ts`    | Spawns/manages Docker containers, OpenCode SDK client |
-| `channels/mattermost.ts` | Mattermost channel adapter                            |
-| `channels/telegram.ts`   | Telegram channel adapter                              |
-| `channels/registry.ts`   | Channel self-registration                             |
-| `router.ts`              | Message formatting, trigger detection, routing        |
-| `group-queue.ts`         | Per-group message queue with concurrency control      |
-| `task-scheduler.ts`      | Cron/interval/one-shot task execution                 |
-| `ipc.ts`                 | Filesystem IPC watcher (agent → host communication)   |
-| `db.ts`                  | SQLite — messages, groups, sessions, tasks, state     |
-| `env.ts`                 | Environment validation (zod)                          |
+| File                   | Purpose                                               |
+| ---------------------- | ----------------------------------------------------- |
+| `index.ts`             | Main loop — startup, polling, message dispatch        |
+| `container-runner.ts`  | Spawns/manages Docker containers, OpenCode SDK client |
+| `channels/matrix.ts`   | Matrix channel adapter                                |
+| `channels/telegram.ts` | Telegram channel adapter                              |
+| `channels/registry.ts` | Channel self-registration                             |
+| `router.ts`            | Message formatting, trigger detection, routing        |
+| `group-queue.ts`       | Per-group message queue with concurrency control      |
+| `task-scheduler.ts`    | Cron/interval/one-shot task execution                 |
+| `ipc.ts`               | Filesystem IPC watcher (agent → host communication)   |
+| `db.ts`                | SQLite — messages, groups, sessions, tasks, state     |
+| `env.ts`               | Environment validation (zod)                          |
 
 ### Agent (`agent/`)
 
@@ -303,9 +303,9 @@ All containers share the `openbob` Docker network. The host reaches agent contai
 | `DATA_PATH`             | Yes       | Absolute host path for persistent data                            |
 | `MODEL`                 | Yes       | Default model, e.g. `anthropic/claude-sonnet-4-6`                 |
 | `TELEGRAM_BOT_TOKEN`    | Channel   | Telegram bot token (from @BotFather)                              |
-| `MATTERMOST_URL`        | Channel   | Mattermost server URL                                             |
-| `MATTERMOST_TOKEN`      | Channel   | Mattermost bot account token                                      |
-| `INITIAL_GROUP_JID`     | First run | Channel JID — prefix determines channel (`tg:` / `mm:`)           |
+| `MATRIX_HOMESERVER_URL` | Channel   | Matrix homeserver URL                                             |
+| `MATRIX_ACCESS_TOKEN`   | Channel   | Matrix bot access token                                           |
+| `INITIAL_GROUP_JID`     | First run | Channel JID — prefix determines channel (`tg:` / `mx:`)           |
 | `INITIAL_GROUP_FOLDER`  | No        | Workspace folder name (default: `main`)                           |
 | `INITIAL_GROUP_TRIGGER` | No        | Trigger word (default: assistant name)                            |
 | `INITIAL_GROUP_IS_MAIN` | No        | `true` for admin channel (default: `true`)                        |
@@ -423,7 +423,7 @@ docker compose build
 ```
 openbob/
 ├── src/                    # Host application
-│   ├── channels/           # Channel adapters (Telegram, Mattermost, ...)
+│   ├── channels/           # Channel adapters (Telegram, Matrix, ...)
 │   ├── index.ts            # Orchestrator main loop
 │   ├── container-runner.ts # Docker container management
 │   ├── db.ts               # SQLite database
