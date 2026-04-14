@@ -352,7 +352,15 @@ export class MatrixChannel implements Channel {
     if (!mxcUrl || !this.client) return `[${label}]`;
 
     try {
-      const httpUrl = this.client.mxcUrlToHttp(mxcUrl);
+      const httpUrl = this.client.mxcUrlToHttp(
+        mxcUrl,
+        undefined,
+        undefined,
+        undefined,
+        false,
+        true,
+        true,
+      );
       if (!httpUrl) return `[${label}]`;
 
       const response = await fetch(httpUrl, {
@@ -413,7 +421,15 @@ export class MatrixChannel implements Channel {
     if (!mxcUrl || !this.client) return '[Voice message]';
 
     try {
-      const httpUrl = this.client.mxcUrlToHttp(mxcUrl);
+      const httpUrl = this.client.mxcUrlToHttp(
+        mxcUrl,
+        undefined,
+        undefined,
+        undefined,
+        false,
+        true,
+        true,
+      );
       if (!httpUrl) return '[Voice message]';
 
       const response = await fetch(httpUrl, {
