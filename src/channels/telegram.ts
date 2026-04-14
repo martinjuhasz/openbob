@@ -358,6 +358,17 @@ export class TelegramChannel implements Channel {
         const text = await transcribeAudio(result.buffer, 'voice.oga');
         if (text) {
           storeNonText(ctx, `[Voice: ${text}]`);
+          // Send transcription as a reply to the voice message so users see it immediately
+          ctx
+            .reply(`🎤 ${text}`, {
+              reply_parameters: { message_id: ctx.message.message_id },
+            })
+            .catch((replyErr: unknown) =>
+              logger.debug(
+                { replyErr },
+                'Failed to send voice transcription reply',
+              ),
+            );
           logger.info(
             { chatJid, chars: text.length },
             'Telegram voice message transcribed',

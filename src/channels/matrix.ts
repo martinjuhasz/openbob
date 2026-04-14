@@ -272,6 +272,18 @@ export class MatrixChannel implements Channel {
 
         if (isVoice) {
           messageContent = await this.handleVoiceMessage(event, group, jid);
+          // Send transcription as a notice so users see it immediately
+          if (messageContent.startsWith('[Voice: ') && this.client && roomId) {
+            const transcribedText = messageContent.slice(8, -1);
+            this.client
+              .sendNotice(roomId, `🎤 ${transcribedText}`)
+              .catch((noticeErr: unknown) =>
+                logger.debug(
+                  { noticeErr },
+                  'Failed to send voice transcription notice',
+                ),
+              );
+          }
         } else {
           messageContent = '[Audio]';
         }

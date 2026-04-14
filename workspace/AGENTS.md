@@ -21,6 +21,11 @@ Read `/workspace/context.json` to find your identity:
 - `groupFolder` — your workspace folder name
 - `isMain` — whether you are the main (admin) group
 
+## Message Formats
+
+- **Text messages**: `[Sender](timestamp): message text`
+- **Voice messages**: `[Sender](timestamp): [Voice: transcribed text]` — The audio has already been transcribed to text. Treat the content inside `[Voice: ...]` as a normal text message. Do NOT tell the user you cannot process voice messages — you can, the transcription is already done.
+
 ## Important Paths
 
 - `/workspace/data/project/` — your working directory (read-write)
