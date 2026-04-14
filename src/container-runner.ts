@@ -292,10 +292,25 @@ const containerModels = new Map<string, string>();
 const spawnInProgress = new Map<string, Promise<string>>();
 // Track last activity time per container for idle timeout: folder → timestamp (ms)
 const lastActivity = new Map<string, number>();
+// Abort controllers for running agent sessions: folder → AbortController
+const sessionAbortControllers = new Map<string, AbortController>();
 
 /** Update the last-activity timestamp for a group's container. */
 function touchContainer(groupFolder: string): void {
   lastActivity.set(groupFolder, Date.now());
+}
+
+/**
+ * Abort a running agent session for a group.
+ * Signals the polling loop in runAgentSession to stop and abort the OpenCode session.
+ * No-op if no session is currently running for the group.
+ */
+export function abortAgentSession(groupFolder: string): void {
+  const ac = sessionAbortControllers.get(groupFolder);
+  if (ac) {
+    ac.abort();
+    logger.info({ groupFolder }, 'Agent session abort requested');
+  }
 }
 
 let idleCheckerRunning = false;
@@ -721,6 +736,10 @@ export async function runAgentSession(
 ): Promise<ContainerOutput> {
   const { groupFolder, prompt, chatJid, isMain, model } = input;
 
+  // Create an AbortController so /stop can interrupt this session
+  const abortController = new AbortController();
+  sessionAbortControllers.set(groupFolder, abortController);
+
   let agentName: string;
   try {
     agentName = await getAgentContainer(groupFolder, model);
@@ -949,6 +968,13 @@ export async function runAgentSession(
     let pollExitReason = 'timeout';
     while (Date.now() < deadline) {
       await new Promise((r) => setTimeout(r, RESPONSE_POLL_INTERVAL));
+
+      // Check if /stop was requested
+      if (abortController.signal.aborted) {
+        pollExitReason = 'aborted';
+        break;
+      }
+
       const statusRes = await client.session.status();
       const sessionStatus = statusRes.data?.[sessionId];
       const statusType = sessionStatus?.type;
@@ -976,12 +1002,12 @@ export async function runAgentSession(
     }
     logger.info({ groupFolder, sessionId, pollExitReason }, 'Poll loop exited');
 
-    // On timeout, abort the session so the agent stops and the session
+    // On timeout or /stop, abort the session so the agent stops and the session
     // remains reusable (preserving conversation history).
-    if (pollExitReason === 'timeout') {
+    if (pollExitReason === 'timeout' || pollExitReason === 'aborted') {
       logger.warn(
-        { groupFolder, sessionId },
-        'Session poll timed out — aborting session',
+        { groupFolder, sessionId, reason: pollExitReason },
+        'Aborting agent session',
       );
       await client.session
         .abort({ path: { id: sessionId } })
@@ -995,6 +1021,13 @@ export async function runAgentSession(
         const s = await client.session.status().catch(() => null);
         if (s?.data?.[sessionId]?.type !== 'busy') break;
       }
+    }
+
+    // On /stop, return immediately — don't extract or send the partial response
+    if (pollExitReason === 'aborted') {
+      touchContainer(groupFolder);
+      sessionAbortControllers.delete(groupFolder);
+      return { status: 'success', result: null, newSessionId: sessionId };
     }
 
     // Fetch messages and find last assistant message added AFTER our prompt
@@ -1128,11 +1161,13 @@ export async function runAgentSession(
     }
 
     touchContainer(groupFolder);
+    sessionAbortControllers.delete(groupFolder);
     return { status: 'success', result: text, newSessionId: sessionId };
     // eslint-disable-next-line no-catch-all/no-catch-all -- return error status instead of crashing
   } catch (err) {
     logger.error({ groupFolder, sessionId, err }, 'OpenCode session error');
     touchContainer(groupFolder);
+    sessionAbortControllers.delete(groupFolder);
     return { status: 'error', result: null, error: String(err) };
   }
 }

@@ -17,6 +17,7 @@ import {
   stopAllContainers,
   stopGroupContainer,
   runAgentSession,
+  abortAgentSession,
   warmUpContainers,
   startupWarmUp,
   startIdleChecker,
@@ -387,20 +388,33 @@ async function main(): Promise<void> {
       const group = registeredGroups[chatJid];
       if (!group) return;
 
-      if (command === 'reset') {
+      if (command === 'new') {
         deleteSession(group.folder);
         const channel = findChannel(channels, chatJid);
         if (channel) {
           channel
-            .sendMessage(chatJid, '🔄 Session zurückgesetzt. Neuer Kontext.')
+            .sendMessage(chatJid, '🔄 Neue Session gestartet.')
             .catch((err: unknown) =>
               logger.warn(
                 { chatJid, err },
-                'Failed to send reset confirmation',
+                'Failed to send new session confirmation',
               ),
             );
         }
-        logger.info({ group: group.name }, 'reset: session cleared');
+        logger.info({ group: group.name }, 'new: session cleared');
+      }
+
+      if (command === 'stop') {
+        abortAgentSession(group.folder);
+        const channel = findChannel(channels, chatJid);
+        if (channel) {
+          channel
+            .sendMessage(chatJid, '🛑 Agent wird gestoppt.')
+            .catch((err: unknown) =>
+              logger.warn({ chatJid, err }, 'Failed to send stop confirmation'),
+            );
+        }
+        logger.info({ group: group.name }, 'stop: agent session aborted');
       }
     },
     onGroupMigrated: (oldJid: string, newJid: string) => {

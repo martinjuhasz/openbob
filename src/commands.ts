@@ -6,7 +6,7 @@ import { Command } from './types.js';
 
 /**
  * Parse a raw message into a normalized Command, regardless of prefix.
- * Accepts both `/reset` and `!reset` so each channel can use its native syntax.
+ * Accepts both `/new` and `!new` so each channel can use its native syntax.
  * Returns null if the message is not a recognized orchestrator command.
  */
 export function parseCommand(text: string): Command | null {
@@ -14,6 +14,7 @@ export function parseCommand(text: string): Command | null {
   const match = trimmed.match(/^[/!](\w+)$/);
   if (!match) return null;
   const cmd = match[1].toLowerCase();
-  if (cmd === 'reset') return 'reset';
+  if (cmd === 'new' || cmd === 'reset') return 'new';
+  if (cmd === 'stop') return 'stop';
   return null;
 }

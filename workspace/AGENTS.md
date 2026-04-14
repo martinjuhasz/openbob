@@ -78,7 +78,7 @@ You have built-in tools for all actions. Use them directly — do not write IPC 
 
 ### Session Management
 
-**reset_session** — Reset the current conversation session. Clears conversation history and starts fresh. Users can also type `/reset` in chat.
+**reset_session** — Reset the current conversation session. Clears conversation history and starts fresh. Users can also type `/new` (or `/reset`) in chat.
 
 **list_sessions** — List all available conversation sessions for this group. Shows session IDs, titles, and creation timestamps.
 
