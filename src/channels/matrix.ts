@@ -32,6 +32,25 @@ import { ChannelOpts, registerChannel } from './registry.js';
 
 const JID_PREFIX = 'mx:';
 
+/**
+ * A logger for the matrix-js-sdk that suppresses noisy HTTP request logs
+ * (FetchHttpApi debug lines) while forwarding warnings and errors to our
+ * pino logger.
+ */
+function createMatrixLogger() {
+  const noop = (): void => {};
+  const matrixLogger = {
+    trace: noop,
+    debug: noop,
+    info: noop,
+    warn: (...msg: unknown[]) => logger.warn({ matrixSdk: msg }, 'matrix-sdk'),
+    error: (...msg: unknown[]) =>
+      logger.error({ matrixSdk: msg }, 'matrix-sdk'),
+    getChild: () => createMatrixLogger(),
+  };
+  return matrixLogger;
+}
+
 export class MatrixChannel implements Channel {
   readonly name = 'matrix';
 
@@ -69,6 +88,7 @@ export class MatrixChannel implements Channel {
       baseUrl: this.homeserverUrl,
       accessToken: this.accessToken,
       userId: this.botUserId,
+      logger: createMatrixLogger(),
     });
 
     // Auto-join rooms when invited
