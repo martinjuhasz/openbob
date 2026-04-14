@@ -11,7 +11,7 @@ import type { Api } from 'grammy';
 import { ASSISTANT_NAME, GROUPS_DIR } from '../config.js';
 import { parseCommand } from '../commands.js';
 import { logger } from '../logger.js';
-import { isTranscriptionEnabled, transcribeAudio } from '../transcription.js';
+import { transcribeAudio } from '../transcription.js';
 import {
   Channel,
   GroupConfig,
@@ -342,11 +342,6 @@ export class TelegramChannel implements Channel {
         return;
       }
 
-      if (!isTranscriptionEnabled()) {
-        storeNonText(ctx, '[Voice message]');
-        return;
-      }
-
       const fileId = ctx.message.voice?.file_id;
       if (!fileId) {
         storeNonText(ctx, '[Voice message]');
@@ -368,7 +363,7 @@ export class TelegramChannel implements Channel {
             'Telegram voice message transcribed',
           );
         } else {
-          storeNonText(ctx, '[Voice message - transcription failed]');
+          storeNonText(ctx, '[Voice message]');
         }
         // eslint-disable-next-line no-catch-all/no-catch-all -- graceful degradation for voice transcription
       } catch (err) {

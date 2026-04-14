@@ -19,7 +19,7 @@ import type { MatrixEvent, Room } from 'matrix-js-sdk';
 import { ASSISTANT_NAME, GROUPS_DIR } from '../config.js';
 import { parseCommand } from '../commands.js';
 import { logger } from '../logger.js';
-import { isTranscriptionEnabled, transcribeAudio } from '../transcription.js';
+import { transcribeAudio } from '../transcription.js';
 import {
   Channel,
   GroupConfig,
@@ -376,8 +376,6 @@ export class MatrixChannel implements Channel {
     _group: GroupConfig,
     jid: string,
   ): Promise<string> {
-    if (!isTranscriptionEnabled()) return '[Voice message]';
-
     const content = event.getContent();
     const mxcUrl = content.url as string | undefined;
     if (!mxcUrl || !this.client) return '[Voice message]';
@@ -412,7 +410,7 @@ export class MatrixChannel implements Channel {
         return `[Voice: ${text}]`;
       }
 
-      return '[Voice message - transcription failed]';
+      return '[Voice message]';
       // eslint-disable-next-line no-catch-all/no-catch-all -- graceful degradation for voice transcription
     } catch (err) {
       logger.warn(

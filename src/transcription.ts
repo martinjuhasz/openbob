@@ -4,61 +4,73 @@
  * Channel-agnostic: accepts raw audio bytes (any format the STT service
  * supports — OGG/Opus, WAV, FLAC, etc.) and returns transcribed text.
  *
- * The STT service is auto-detected at startup by probing the health endpoint
- * of the openbob-stt container. No configuration needed — just start with
- * `docker compose --profile stt up`.
+ * The STT service is auto-detected by probing the health endpoint of the
+ * openbob-stt container. The probe result is cached for 60s so we don't
+ * hit a timeout on every voice message when the service is down, but
+ * also recover automatically when it becomes available later.
+ *
+ * No configuration needed — just start with `docker compose --profile stt up`.
  */
 
 import { logger } from './logger.js';
 
 const STT_SERVICE_URL = 'http://openbob-stt:8000';
 
-let sttAvailable: boolean | null = null;
+/** Cached probe result + timestamp. */
+let sttProbe: { available: boolean; checkedAt: number } | null = null;
+
+/** Re-probe after 60 seconds. */
+const PROBE_TTL_MS = 60_000;
 
 /**
- * Probe the STT service health endpoint once at startup.
- * Caches the result — subsequent calls return immediately.
+ * Probe the STT service health endpoint.
+ * Caches the result for PROBE_TTL_MS to avoid repeated timeouts.
  */
 async function probeStt(): Promise<boolean> {
-  if (sttAvailable !== null) return sttAvailable;
+  const now = Date.now();
+  if (sttProbe && now - sttProbe.checkedAt < PROBE_TTL_MS) {
+    return sttProbe.available;
+  }
 
+  let available = false;
   try {
     const response = await fetch(`${STT_SERVICE_URL}/health`, {
       signal: AbortSignal.timeout(3_000),
     });
-    sttAvailable = response.ok;
+    available = response.ok;
     // eslint-disable-next-line no-catch-all/no-catch-all -- probe failure means STT is not available
   } catch (_err) {
-    sttAvailable = false;
+    available = false;
   }
 
-  if (sttAvailable) {
-    logger.info('STT service detected at %s', STT_SERVICE_URL);
-  } else {
-    logger.debug('STT service not available — voice transcription disabled');
+  const wasAvailable = sttProbe?.available ?? null;
+  sttProbe = { available, checkedAt: now };
+
+  // Only log on state changes to avoid spam
+  if (wasAvailable !== available) {
+    if (available) {
+      logger.info('STT service detected at %s', STT_SERVICE_URL);
+    } else {
+      logger.debug('STT service not available — voice transcription disabled');
+    }
   }
 
-  return sttAvailable;
+  return available;
 }
 
 /**
  * Whether speech-to-text transcription is available.
- * Returns false until probeStt() has been called.
+ * Uses the cached probe result (synchronous). Returns false if never probed.
  */
 export function isTranscriptionEnabled(): boolean {
-  return sttAvailable === true;
-}
-
-/**
- * Initialize STT: probe the service and cache availability.
- * Call once at startup.
- */
-export async function initTranscription(): Promise<void> {
-  await probeStt();
+  return sttProbe?.available === true;
 }
 
 /**
  * Transcribe audio bytes to text.
+ *
+ * Probes the STT service first (with caching). If the service is not
+ * available, returns null immediately without a long timeout.
  *
  * @param audioBuffer - Raw audio file bytes (OGG/Opus, WAV, FLAC, etc.)
  * @param filename    - Filename hint for the STT service (e.g. "voice.oga")
@@ -68,7 +80,8 @@ export async function transcribeAudio(
   audioBuffer: Buffer,
   filename = 'audio.oga',
 ): Promise<string | null> {
-  if (!isTranscriptionEnabled()) {
+  const available = await probeStt();
+  if (!available) {
     return null;
   }
 

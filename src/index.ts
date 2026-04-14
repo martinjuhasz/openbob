@@ -47,7 +47,6 @@ import {
   formatOutbound,
 } from './router.js';
 import { startSchedulerLoop } from './task-scheduler.js';
-import { initTranscription } from './transcription.js';
 import { Channel, Command, GroupConfig, NewMessage } from './types.js';
 
 let lastTimestamp = '';
@@ -456,9 +455,6 @@ async function main(): Promise<void> {
     logger.fatal('No channels connected');
     process.exit(1);
   }
-
-  // Probe STT service — auto-enables voice transcription if the stt profile is active
-  await initTranscription();
 
   startSchedulerLoop({
     registeredGroups: () => registeredGroups,
