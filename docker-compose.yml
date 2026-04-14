@@ -54,6 +54,22 @@ services:
     networks:
       - openbob
 
+  openbob-stt:
+    build:
+      context: ./stt
+      dockerfile: Dockerfile
+    image: openbob-stt:latest
+    container_name: openbob-stt
+    restart: unless-stopped
+    volumes:
+      - ${DATA_PATH}/stt-models:/models
+    environment:
+      - STT_MODEL=${STT_MODEL:-nemo-parakeet-tdt-0.6b-v3}
+    networks:
+      - openbob
+    profiles:
+      - stt
+
   openviking:
     build:
       context: ./openviking

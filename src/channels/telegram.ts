@@ -11,6 +11,7 @@ import type { Api } from 'grammy';
 import { ASSISTANT_NAME, GROUPS_DIR } from '../config.js';
 import { parseCommand } from '../commands.js';
 import { logger } from '../logger.js';
+import { isTranscriptionEnabled, transcribeAudio } from '../transcription.js';
 import {
   Channel,
   GroupConfig,
@@ -333,7 +334,51 @@ export class TelegramChannel implements Channel {
     });
 
     this.bot.on('message:video', (ctx) => storeNonText(ctx, '[Video]'));
-    this.bot.on('message:voice', (ctx) => storeNonText(ctx, '[Voice message]'));
+    this.bot.on('message:voice', async (ctx) => {
+      const chatJid = `${JID_PREFIX}${ctx.chat.id}`;
+      const group = this.registeredGroups()[chatJid];
+      if (!group) {
+        storeNonText(ctx, '[Voice message]');
+        return;
+      }
+
+      if (!isTranscriptionEnabled()) {
+        storeNonText(ctx, '[Voice message]');
+        return;
+      }
+
+      const fileId = ctx.message.voice?.file_id;
+      if (!fileId) {
+        storeNonText(ctx, '[Voice message]');
+        return;
+      }
+
+      try {
+        const result = await downloadTelegramFile(this.botToken, fileId);
+        if (!result) {
+          storeNonText(ctx, '[Voice message - download failed]');
+          return;
+        }
+
+        const text = await transcribeAudio(result.buffer, 'voice.oga');
+        if (text) {
+          storeNonText(ctx, `[Voice: ${text}]`);
+          logger.info(
+            { chatJid, chars: text.length },
+            'Telegram voice message transcribed',
+          );
+        } else {
+          storeNonText(ctx, '[Voice message - transcription failed]');
+        }
+        // eslint-disable-next-line no-catch-all/no-catch-all -- graceful degradation for voice transcription
+      } catch (err) {
+        logger.warn(
+          { err },
+          'Failed to transcribe Telegram voice message, using placeholder',
+        );
+        storeNonText(ctx, '[Voice message]');
+      }
+    });
     this.bot.on('message:audio', (ctx) => storeNonText(ctx, '[Audio]'));
     this.bot.on('message:document', async (ctx) => {
       const chatJid = `${JID_PREFIX}${ctx.chat.id}`;

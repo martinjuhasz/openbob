@@ -19,6 +19,7 @@ import type { MatrixEvent, Room } from 'matrix-js-sdk';
 import { ASSISTANT_NAME, GROUPS_DIR } from '../config.js';
 import { parseCommand } from '../commands.js';
 import { logger } from '../logger.js';
+import { isTranscriptionEnabled, transcribeAudio } from '../transcription.js';
 import {
   Channel,
   GroupConfig,
@@ -263,9 +264,19 @@ export class MatrixChannel implements Channel {
       case MsgType.Video:
         messageContent = '[Video]';
         break;
-      case MsgType.Audio:
-        messageContent = '[Audio]';
+      case MsgType.Audio: {
+        // Matrix voice messages have the org.matrix.msc3245.voice property
+        const isVoice =
+          'org.matrix.msc3245.voice' in content ||
+          'org.matrix.msc1767.audio' in content;
+
+        if (isVoice) {
+          messageContent = await this.handleVoiceMessage(event, group, jid);
+        } else {
+          messageContent = '[Audio]';
+        }
         break;
+      }
       default:
         messageContent = `[${msgtype ?? 'Unknown message type'}]`;
         break;
@@ -352,6 +363,63 @@ export class MatrixChannel implements Channel {
         'Failed to download Matrix media, using placeholder',
       );
       return `[${label} - download failed]`;
+    }
+  }
+
+  /**
+   * Download a voice message from Matrix, transcribe it via STT, and return
+   * the transcribed text wrapped as [Voice: ...]. Falls back to [Voice message]
+   * if transcription is disabled or fails.
+   */
+  private async handleVoiceMessage(
+    event: MatrixEvent,
+    _group: GroupConfig,
+    jid: string,
+  ): Promise<string> {
+    if (!isTranscriptionEnabled()) return '[Voice message]';
+
+    const content = event.getContent();
+    const mxcUrl = content.url as string | undefined;
+    if (!mxcUrl || !this.client) return '[Voice message]';
+
+    try {
+      const httpUrl = this.client.mxcUrlToHttp(mxcUrl);
+      if (!httpUrl) return '[Voice message]';
+
+      const response = await fetch(httpUrl, {
+        headers: { Authorization: `Bearer ${this.accessToken}` },
+      });
+      if (!response.ok) {
+        logger.warn(
+          { status: response.status, mxcUrl },
+          'Failed to download Matrix voice message',
+        );
+        return '[Voice message - download failed]';
+      }
+
+      const arrayBuffer = await response.arrayBuffer();
+      const audioBuffer = Buffer.from(arrayBuffer);
+      const filename =
+        (content.body as string)?.replace(/[^a-zA-Z0-9._-]/g, '_') ||
+        'voice.ogg';
+
+      const text = await transcribeAudio(audioBuffer, filename);
+      if (text) {
+        logger.info(
+          { jid, chars: text.length },
+          'Matrix voice message transcribed',
+        );
+        return `[Voice: ${text}]`;
+      }
+
+      return '[Voice message - transcription failed]';
+      // eslint-disable-next-line no-catch-all/no-catch-all -- graceful degradation for voice transcription
+    } catch (err) {
+      logger.warn(
+        { err },
+        'Failed to transcribe Matrix voice message, using placeholder',
+      );
+      return '[Voice message]';
     }
   }
 
