@@ -84,6 +84,7 @@ The host manages all OpenViking communication — the agent itself doesn't need 
 - **Per-group model override** — Different groups can use different LLM models.
 - **MCP tools** — Agents have access to custom tools (send messages, schedule tasks, manage groups) via the Model Context Protocol.
 - **Skills** — Read-only skill packs mounted into containers (e.g., `agent-browser`, `status`).
+- **Voice transcription** (optional) — Transcribes voice messages to text using NVIDIA Parakeet TDT. CPU-only, no GPU required.
 - **OpenViking memory** (optional) — Semantic recall and storage across sessions. Agents build up knowledge over time.
 
 ## Quick Start
@@ -192,6 +193,18 @@ To enable OpenViking memory:
 docker compose --profile memory up -d
 ```
 
+To enable voice transcription (Speech-to-Text):
+
+```bash
+docker compose --profile stt up -d
+```
+
+Profiles can be combined:
+
+```bash
+docker compose --profile memory --profile stt up -d
+```
+
 ### First Message
 
 In your configured channel, mention the trigger word:
@@ -221,6 +234,16 @@ Single Node.js process that orchestrates everything:
 | `ipc.ts`               | Filesystem IPC watcher (agent → host communication)   |
 | `db.ts`                | SQLite — messages, groups, sessions, tasks, state     |
 | `env.ts`               | Environment validation (zod)                          |
+
+### STT Service (`stt/`)
+
+Runs as a Docker Compose sidecar (profile `stt`):
+
+| File            | Purpose                                                             |
+| --------------- | ------------------------------------------------------------------- |
+| `main.py`       | FastAPI service — `/transcribe` (multipart audio → text), `/health` |
+| `Dockerfile`    | Python 3.11 slim + onnx-asr, libsndfile, ffmpeg                     |
+| `entrypoint.sh` | Validates model files, starts uvicorn                               |
 
 ### Agent (`agent/`)
 
@@ -290,6 +313,7 @@ All containers share the `openbob` Docker network. The host reaches agent contai
 │       │                       │             │
 │       └──IPC (filesystem)─────┘             │
 │                                             │
+│  openbob-stt (optional, :8000)              │
 │  openbob-openviking (optional, :1933)       │
 └─────────────────────────────────────────────┘
 ```
@@ -338,6 +362,36 @@ Groups can use different models. Set the `model` field when registering a group 
 **Setup with `docker compose --profile memory`:**
 
 The OpenViking service needs its own LLM access for embedding/extraction. Configure `OPENVIKING_LLM_KEY` in your `.env` file — this key is only used by OpenViking itself, not by agents.
+
+### Speech-to-Text (STT)
+
+openbob can automatically transcribe voice messages to text using [NVIDIA Parakeet TDT](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v2) — a fast, accurate speech recognition model running on CPU via [onnx-asr](https://github.com/jianfch/onnx-asr). No GPU required.
+
+**How it works:**
+
+1. A user sends a voice message in Telegram or Matrix
+2. The host downloads the audio and sends it to the STT sidecar container
+3. The transcribed text appears immediately as a reply in the chat (`🎤 transcribed text`)
+4. The message is stored as `[Voice: transcribed text]` and processed normally — including trigger detection, so voice messages can activate the agent
+
+**Setup with `docker compose --profile stt`:**
+
+No configuration needed. The STT service is auto-detected via health probe — if it's running, voice transcription is enabled; if not, voice messages are stored as `[Voice message]` placeholders.
+
+On first startup, the ~600MB ONNX model is downloaded from HuggingFace and cached in `${DATA_PATH}/stt-models/`.
+
+**Supported channels:**
+
+| Channel  | Voice detection                                                 | Audio format |
+| -------- | --------------------------------------------------------------- | ------------ |
+| Telegram | `message:voice` events (voice recordings only, not audio files) | OGG/Opus     |
+| Matrix   | `MsgType.Audio` with `org.matrix.msc3245.voice` property        | OGG/Opus     |
+
+**Optional env var:**
+
+| Variable    | Default                     | Description            |
+| ----------- | --------------------------- | ---------------------- |
+| `STT_MODEL` | `nemo-parakeet-tdt-0.6b-v3` | Parakeet model variant |
 
 ## MCP Servers
 
@@ -435,6 +489,10 @@ openbob/
 │   └── src/
 │       ├── index.ts        # OpenCode server startup
 │       └── mcp-server.ts   # MCP tools for the agent
+├── stt/                    # Speech-to-text sidecar
+│   ├── main.py             # FastAPI STT service (Parakeet TDT)
+│   ├── Dockerfile          # Python 3.11 + onnx-asr
+│   └── entrypoint.sh       # Startup + model validation
 ├── workspace/
 │   ├── AGENTS.md           # Agent instructions (mounted into containers)
 │   └── opencode.json       # Base config template (model, permissions, MCP servers)
