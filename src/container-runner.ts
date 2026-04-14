@@ -1064,18 +1064,7 @@ export async function runAgentSession(
       .map((p) => p.text)
       .join('');
 
-    // Check if the agent already sent a message via the send_message MCP tool.
-    // If so, suppress the text response to avoid duplicate messages in chat.
-    const agentSentViaIpc = messages.some((m) =>
-      (m.parts ?? []).some(
-        (p) =>
-          p.type === 'tool' &&
-          (p.tool === 'openbob_send_message' || p.tool === 'send_message') &&
-          p.state?.status === 'completed',
-      ),
-    );
-
-    if (!text && !agentSentViaIpc) {
+    if (!text) {
       logger.warn(
         {
           groupFolder,
@@ -1092,24 +1081,12 @@ export async function runAgentSession(
       };
     }
 
-    // If the agent already sent messages via send_message tool, suppress the
-    // final text response to avoid duplicate messages in chat.
-    const result = agentSentViaIpc ? null : text;
-
-    if (agentSentViaIpc && text) {
-      logger.debug(
-        { groupFolder, sessionId, chars: text.length },
-        'Suppressing text response — agent already sent via send_message tool',
-      );
-    }
-
     logger.debug(
       {
         groupFolder,
         sessionId,
         chars: text.length,
         text,
-        agentSentViaIpc,
         messageSummary: summarizeMessages(messages.slice(-3)),
       },
       'OpenCode response received',
@@ -1151,7 +1128,7 @@ export async function runAgentSession(
     }
 
     touchContainer(groupFolder);
-    return { status: 'success', result, newSessionId: sessionId };
+    return { status: 'success', result: text, newSessionId: sessionId };
     // eslint-disable-next-line no-catch-all/no-catch-all -- return error status instead of crashing
   } catch (err) {
     logger.error({ groupFolder, sessionId, err }, 'OpenCode session error');
