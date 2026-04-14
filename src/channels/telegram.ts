@@ -9,12 +9,14 @@ import { Bot, InputFile } from 'grammy';
 import type { Api } from 'grammy';
 
 import { ASSISTANT_NAME, GROUPS_DIR } from '../config.js';
+import { parseCommand } from '../commands.js';
 import { logger } from '../logger.js';
 import {
   Channel,
   GroupConfig,
   NewMessage,
   OnChatMetadata,
+  OnCommand,
   OnInboundMessage,
 } from '../types.js';
 import { ChannelOpts, registerChannel } from './registry.js';
@@ -92,6 +94,7 @@ export class TelegramChannel implements Channel {
   private botToken: string;
   private onMessage: OnInboundMessage;
   private onChatMetadata: OnChatMetadata;
+  private onCommand: OnCommand;
   private onGroupMigrated: (oldJid: string, newJid: string) => void;
   private registeredGroups: () => Record<string, GroupConfig>;
 
@@ -99,12 +102,14 @@ export class TelegramChannel implements Channel {
     botToken: string;
     onMessage: OnInboundMessage;
     onChatMetadata: OnChatMetadata;
+    onCommand: OnCommand;
     onGroupMigrated: (oldJid: string, newJid: string) => void;
     registeredGroups: () => Record<string, GroupConfig>;
   }) {
     this.botToken = opts.botToken;
     this.onMessage = opts.onMessage;
     this.onChatMetadata = opts.onChatMetadata;
+    this.onCommand = opts.onCommand;
     this.onGroupMigrated = opts.onGroupMigrated;
     this.registeredGroups = opts.registeredGroups;
   }
@@ -162,6 +167,17 @@ export class TelegramChannel implements Channel {
       }
 
       const chatJid = `${JID_PREFIX}${ctx.chat.id}`;
+
+      // Orchestrator commands — intercept and forward via onCommand callback
+      const command = parseCommand(ctx.message.text);
+      if (command) {
+        // Only handle commands for registered groups
+        if (this.registeredGroups()[chatJid]) {
+          this.onCommand(chatJid, command);
+        }
+        return;
+      }
+
       let content = ctx.message.text;
       const timestamp = new Date(ctx.message.date * 1000).toISOString();
       const senderName =
@@ -536,6 +552,7 @@ registerChannel('telegram', (opts: ChannelOpts) => {
     botToken: token,
     onMessage: opts.onMessage,
     onChatMetadata: opts.onChatMetadata,
+    onCommand: opts.onCommand,
     onGroupMigrated: opts.onGroupMigrated,
     registeredGroups: opts.registeredGroups,
   });

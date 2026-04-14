@@ -120,6 +120,7 @@ const baseOpts = {
   botToken: 'test-bot-token',
   onMessage: vi.fn(),
   onChatMetadata: vi.fn(),
+  onCommand: vi.fn(),
   onGroupMigrated: vi.fn(),
   registeredGroups: vi.fn().mockReturnValue({} as Record<string, GroupConfig>),
 };

@@ -47,7 +47,7 @@ import {
   formatOutbound,
 } from './router.js';
 import { startSchedulerLoop } from './task-scheduler.js';
-import { Channel, GroupConfig, NewMessage } from './types.js';
+import { Channel, Command, GroupConfig, NewMessage } from './types.js';
 
 let lastTimestamp = '';
 let lastAgentTimestamp: Record<string, string> = {};
@@ -138,8 +138,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   // of non-trigger messages from permanently blocking trigger detection.
   if (!group.alwaysRespond) {
     const batchHasAction = (msgs: NewMessage[]) =>
-      checkTrigger(msgs, group.trigger) ||
-      msgs.some((m) => m.content.trim() === '/reset');
+      checkTrigger(msgs, group.trigger);
 
     while (!batchHasAction(missedMessages)) {
       // Advance cursor past this batch
@@ -157,23 +156,6 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         return true;
       }
     }
-  }
-
-  // Handle /reset command — reset the session without involving the agent.
-  // Check the most recent message so it works even when older messages are
-  // queued ahead of it. Placed after batch-skipping so /reset is found even
-  // when buried behind 50+ non-trigger messages.
-  const lastMsg = missedMessages[missedMessages.length - 1];
-  if (lastMsg.content.trim() === '/reset') {
-    lastAgentTimestamp[chatJid] = lastMsg.timestamp;
-    saveState();
-    deleteSession(group.folder);
-    await channel.sendMessage(
-      chatJid,
-      '🔄 Session zurückgesetzt. Neuer Kontext.',
-    );
-    logger.info({ group: group.name }, '/reset: session cleared');
-    return true;
   }
 
   const prompt = formatMessages(missedMessages);
@@ -302,13 +284,10 @@ async function startMessageLoop(): Promise<void> {
             const group = registeredGroups[chatJid];
             if (!group) continue;
 
-            // Only enqueue if alwaysRespond, trigger word, or /reset command
+            // Only enqueue if alwaysRespond or trigger word detected
             if (!group.alwaysRespond) {
               const hasTrigger = checkTrigger(groupMessages, group.trigger);
-              const hasReset = groupMessages.some(
-                (m) => m.content.trim() === '/reset',
-              );
-              if (!hasTrigger && !hasReset) continue;
+              if (!hasTrigger) continue;
             }
 
             queue.enqueueMessageCheck(chatJid);
@@ -404,6 +383,26 @@ async function main(): Promise<void> {
       channel?: string,
       isGroup?: boolean,
     ) => storeChatMetadata(chatJid, timestamp, name, channel, isGroup),
+    onCommand: (chatJid: string, command: Command) => {
+      const group = registeredGroups[chatJid];
+      if (!group) return;
+
+      if (command === 'reset') {
+        deleteSession(group.folder);
+        const channel = findChannel(channels, chatJid);
+        if (channel) {
+          channel
+            .sendMessage(chatJid, '🔄 Session zurückgesetzt. Neuer Kontext.')
+            .catch((err: unknown) =>
+              logger.warn(
+                { chatJid, err },
+                'Failed to send reset confirmation',
+              ),
+            );
+        }
+        logger.info({ group: group.name }, 'reset: session cleared');
+      }
+    },
     onGroupMigrated: (oldJid: string, newJid: string) => {
       const migrated = migrateGroupJid(oldJid, newJid);
       if (!migrated) {

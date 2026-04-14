@@ -52,6 +52,7 @@ const baseOpts = {
   botUserId: '@bot:example.com',
   onMessage: vi.fn(),
   onChatMetadata: vi.fn(),
+  onCommand: vi.fn(),
   registeredGroups: vi.fn(() => ({})),
 };
 

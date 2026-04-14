@@ -17,12 +17,14 @@ import {
 import type { MatrixEvent, Room } from 'matrix-js-sdk';
 
 import { ASSISTANT_NAME, GROUPS_DIR } from '../config.js';
+import { parseCommand } from '../commands.js';
 import { logger } from '../logger.js';
 import {
   Channel,
   GroupConfig,
   NewMessage,
   OnChatMetadata,
+  OnCommand,
   OnInboundMessage,
 } from '../types.js';
 import { ChannelOpts, registerChannel } from './registry.js';
@@ -39,6 +41,7 @@ export class MatrixChannel implements Channel {
   private botUserId: string;
   private onMessage: OnInboundMessage;
   private onChatMetadata: OnChatMetadata;
+  private onCommand: OnCommand;
   private registeredGroups: () => Record<string, GroupConfig>;
   private initialSyncDone = false;
 
@@ -48,6 +51,7 @@ export class MatrixChannel implements Channel {
     botUserId: string;
     onMessage: OnInboundMessage;
     onChatMetadata: OnChatMetadata;
+    onCommand: OnCommand;
     registeredGroups: () => Record<string, GroupConfig>;
   }) {
     this.homeserverUrl = opts.homeserverUrl;
@@ -55,6 +59,7 @@ export class MatrixChannel implements Channel {
     this.botUserId = opts.botUserId;
     this.onMessage = opts.onMessage;
     this.onChatMetadata = opts.onChatMetadata;
+    this.onCommand = opts.onCommand;
     this.registeredGroups = opts.registeredGroups;
   }
 
@@ -202,20 +207,11 @@ export class MatrixChannel implements Channel {
       return;
     }
 
-    // Bot commands
+    // Orchestrator commands — intercept and forward via onCommand callback
     if (msgtype === MsgType.Text) {
-      const body = (content.body as string).trim();
-
-      if (body === '!roomid') {
-        await this.client?.sendNotice(
-          roomId,
-          `Room ID: \`${JID_PREFIX}${roomId}\``,
-        );
-        return;
-      }
-
-      if (body === '!ping') {
-        await this.client?.sendNotice(roomId, `${ASSISTANT_NAME} is online.`);
+      const command = parseCommand((content.body as string).trim());
+      if (command) {
+        this.onCommand(jid, command);
         return;
       }
     }
@@ -567,6 +563,7 @@ registerChannel('matrix', (opts: ChannelOpts) => {
     botUserId,
     onMessage: opts.onMessage,
     onChatMetadata: opts.onChatMetadata,
+    onCommand: opts.onCommand,
     registeredGroups: opts.registeredGroups,
   });
 });

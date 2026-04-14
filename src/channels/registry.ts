@@ -4,12 +4,14 @@ import {
   Channel,
   OnInboundMessage,
   OnChatMetadata,
+  OnCommand,
   GroupConfig,
 } from '../types.js';
 
 export interface ChannelOpts {
   onMessage: OnInboundMessage;
   onChatMetadata: OnChatMetadata;
+  onCommand: OnCommand;
   onGroupMigrated: (oldJid: string, newJid: string) => void;
   registeredGroups: () => Record<string, GroupConfig>;
 }
