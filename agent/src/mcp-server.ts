@@ -10,7 +10,7 @@ import { z } from 'zod';
 import fs from 'fs';
 import path from 'path';
 import { CronExpressionParser } from 'cron-parser';
-import { fetchTranscript } from 'youtube-transcript-plus';
+import { transcribeMedia } from './transcription.js';
 
 const IPC_DIR = '/workspace/data/ipc';
 const MESSAGES_DIR = path.join(IPC_DIR, 'messages');
@@ -916,70 +916,66 @@ This restores the conversation history from that session.`,
 );
 
 server.tool(
-  'get_youtube_transcript',
-  `Fetch the transcript/subtitles of a YouTube video. Returns timestamped text segments.
-Works with most YouTube videos that have captions (manual or auto-generated).
-Use this to summarize videos, answer questions about video content, or extract information.
-Accepts full YouTube URLs (youtube.com, youtu.be) or plain video IDs.`,
+  'transcribe_media',
+  `Transcribe audio/video content to text. Supports:
+- YouTube URLs (uses captions if available, falls back to auto-subs, then speech-to-text)
+- Remote audio/video URLs (downloads and transcribes via speech-to-text)
+- Local audio/video files (transcribes via speech-to-text)
+Supported formats: MP3, WAV, OGG, FLAC, M4A, MP4, WEBM, and more.
+For YouTube, this tries multiple methods: published captions → auto-generated subs → audio download + STT.
+Speech-to-text requires the STT service to be running (docker compose --profile stt up).`,
   {
-    url: z
+    source: z
       .string()
       .describe(
-        'YouTube video URL (e.g. "https://www.youtube.com/watch?v=dQw4w9WgXcQ", "https://youtu.be/dQw4w9WgXcQ") or video ID (e.g. "dQw4w9WgXcQ")',
+        'YouTube URL (e.g. "https://www.youtube.com/watch?v=..."), HTTP(S) audio/video URL, or local file path',
       ),
     lang: z
       .string()
       .optional()
       .describe(
-        'Language code for the transcript (e.g. "en", "de", "fr"). Defaults to the video\'s primary language.',
+        'Preferred language code for captions (e.g. "en", "de", "fr"). Only used for YouTube caption lookup.',
       ),
   },
-  async (args: { url: string; lang?: string }) => {
+  async (args: { source: string; lang?: string }) => {
     try {
-      const config: { lang?: string } = {};
-      if (args.lang) config.lang = args.lang;
+      const result = await transcribeMedia(args.source, args.lang);
 
-      const segments = await fetchTranscript(args.url, config);
+      // Format output based on whether we have timestamped segments
+      if (result.segments && result.segments.length > 0) {
+        const lines = result.segments.map((s) => {
+          const totalSeconds = Math.floor(s.offset);
+          const hours = Math.floor(totalSeconds / 3600);
+          const minutes = Math.floor((totalSeconds % 3600) / 60);
+          const seconds = totalSeconds % 60;
+          const timestamp =
+            hours > 0
+              ? `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
+              : `${minutes}:${String(seconds).padStart(2, '0')}`;
+          return `[${timestamp}] ${s.text}`;
+        });
 
-      if (!segments || segments.length === 0) {
+        const header = `Transcript (${result.segments.length} segments, method: ${result.method}${result.language ? `, language: ${result.language}` : ''}):\n\n`;
         return {
-          content: [
-            {
-              type: 'text' as const,
-              text: 'No transcript segments found for this video.',
-            },
-          ],
-          isError: true,
+          content: [{ type: 'text' as const, text: header + lines.join('\n') }],
         };
       }
 
-      // Format as timestamped transcript
-      const lines = segments.map((s: { text: string; offset: number }) => {
-        const totalSeconds = Math.floor(s.offset);
-        const hours = Math.floor(totalSeconds / 3600);
-        const minutes = Math.floor((totalSeconds % 3600) / 60);
-        const seconds = totalSeconds % 60;
-        const timestamp =
-          hours > 0
-            ? `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
-            : `${minutes}:${String(seconds).padStart(2, '0')}`;
-        return `[${timestamp}] ${s.text}`;
-      });
-
-      const header = `Transcript (${segments.length} segments, language: ${segments[0].lang ?? 'unknown'}):\n\n`;
+      // Plain text (STT output, no timestamps)
+      const header = `Transcript (method: ${result.method}):\n\n`;
       return {
-        content: [{ type: 'text' as const, text: header + lines.join('\n') }],
+        content: [{ type: 'text' as const, text: header + result.text }],
       };
     } catch (err: unknown) {
       const message =
         err instanceof Error
           ? err.message
-          : 'Unknown error fetching transcript';
+          : 'Unknown error during transcription';
       return {
         content: [
           {
             type: 'text' as const,
-            text: `Failed to fetch transcript: ${message}`,
+            text: `Failed to transcribe: ${message}`,
           },
         ],
         isError: true,
