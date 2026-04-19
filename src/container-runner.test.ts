@@ -457,7 +457,7 @@ describe('container-runner', () => {
       vi.unstubAllGlobals();
     });
 
-    it('writes fresh config each time (ignores existing per-group config)', async () => {
+    it('preserves user-added MCP servers from existing per-group config', async () => {
       mockExecFile.mockImplementation((_cmd: string, args: string[]) => {
         if (args[0] === 'inspect' && args.length > 2)
           return dockerOk('/workspace:/host/workspace;');
@@ -472,14 +472,28 @@ describe('container-runner', () => {
         vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) }),
       );
 
-      // Template with base settings
+      // Template with base settings and one MCP server
       const template = {
         share: 'disabled',
         permission: { edit: 'allow', bash: 'allow' },
+        mcp: { 'base-tool': { type: 'local', command: ['node', 'base.js'] } },
       };
+
+      // Existing per-group config with a user-added MCP server
+      const existingConfig = {
+        model: 'old-model',
+        share: 'disabled',
+        mcp: {
+          'base-tool': { type: 'local', command: ['node', 'base.js'] },
+          'user-tool': { type: 'local', command: ['node', 'user.js'] },
+        },
+      };
+
       mockFs.readFileSync.mockImplementation((p: string) => {
         if (p === '/workspace/opencode.json') return JSON.stringify(template);
         if (p === '/data/opencode/auth.json') return AUTH_JSON_CONTENT;
+        if (typeof p === 'string' && p.endsWith('opencode.json'))
+          return JSON.stringify(existingConfig);
         const err: NodeJS.ErrnoException = new Error('ENOENT');
         err.code = 'ENOENT';
         throw err;
@@ -497,13 +511,20 @@ describe('container-runner', () => {
       expect(writeCalls.length).toBeGreaterThanOrEqual(1);
 
       const written = JSON.parse(writeCalls[0][1] as string);
-      // Model from argument, not from any existing per-group config
+      // Model from argument, overriding old model
       expect(written.model).toBe('openrouter/anthropic/claude-opus-4');
       // Template defaults applied
       expect(written.share).toBe('disabled');
       expect(written.permission).toEqual({ edit: 'allow', bash: 'allow' });
-      // No stale fields from previous per-group config
-      expect(written.provider).toBeUndefined();
+      // Both MCP servers present — user-added one preserved
+      expect(written.mcp['base-tool']).toEqual({
+        type: 'local',
+        command: ['node', 'base.js'],
+      });
+      expect(written.mcp['user-tool']).toEqual({
+        type: 'local',
+        command: ['node', 'user.js'],
+      });
 
       vi.unstubAllGlobals();
     });

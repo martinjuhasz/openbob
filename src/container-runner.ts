@@ -414,7 +414,9 @@ function getForwardEnvArgs(): string[] {
  * OpenCode's findUp from CWD (/workspace/data/project) discovers this as the parent config.
  * Agents can create their own /workspace/data/project/opencode.json to override settings.
  *
- * The base config is written fresh each time (no merging with existing per-group config).
+ * Merges the template with any existing per-group config so that user-added
+ * settings (e.g. custom MCP servers) are preserved across restarts.
+ * Only `model` is always overwritten from the host.
  */
 const BASE_CONFIG_TEMPLATE = '/workspace/opencode.json';
 
@@ -435,8 +437,27 @@ function writeOpencodeConfig(groupFolder: string, model: string): void {
     }
   }
 
-  // Model is always set dynamically per group
-  const config = { ...template, model };
+  // Read existing per-group config to preserve user additions (e.g. MCP servers)
+  let existing: Record<string, unknown> = {};
+  try {
+    const raw = fs.readFileSync(configPath, 'utf-8');
+    existing = JSON.parse(raw) as Record<string, unknown>;
+  } catch (err) {
+    if (!(err instanceof Error && 'code' in err && err.code === 'ENOENT')) {
+      throw err;
+    }
+    // No existing config — start fresh
+  }
+
+  // Merge: start with existing, overlay template, then set model.
+  // For 'mcp', deep-merge so user-added servers are preserved alongside template ones.
+  const templateMcp =
+    (template.mcp as Record<string, unknown> | undefined) ?? {};
+  const existingMcp =
+    (existing.mcp as Record<string, unknown> | undefined) ?? {};
+  const mergedMcp = { ...existingMcp, ...templateMcp };
+
+  const config = { ...existing, ...template, model, mcp: mergedMcp };
 
   fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
   logger.debug({ groupFolder, model, configPath }, 'Wrote base opencode.json');
