@@ -57,6 +57,7 @@ vi.mock('./db.js', () => ({
   getSession: vi.fn().mockReturnValue(null),
   getOvUserKey: vi.fn().mockReturnValue(null),
   setOvUserKey: vi.fn(),
+  getAllRegisteredGroups: vi.fn().mockReturnValue({}),
 }));
 
 vi.mock('./env.js', () => ({

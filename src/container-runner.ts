@@ -9,10 +9,16 @@ import { createOpencodeClient } from '@opencode-ai/sdk';
 import { promisify } from 'util';
 
 import { DATA_DIR, GROUPS_DIR } from './config.js';
-import { setSession, getSession, getOvUserKey, setOvUserKey } from './db.js';
+import {
+  setSession,
+  getSession,
+  getOvUserKey,
+  setOvUserKey,
+  getAllRegisteredGroups,
+} from './db.js';
 import { getEnv } from './env.js';
 import { logger } from './logger.js';
-import { ContainerInput, ContainerOutput } from './types.js';
+import { ContainerInput, ContainerOutput, ExtraMount } from './types.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -65,6 +71,28 @@ function summarizeMessages(
     };
   });
 }
+
+/**
+ * Build `-v` args for extra bind mounts configured on a group.
+ * hostPath refers to the Docker host machine (not the orchestrator container),
+ * since we talk to the host's Docker daemon via the mounted socket.
+ */
+function buildExtraMountArgs(groupFolder: string): string[] {
+  const groups = getAllRegisteredGroups();
+  const group = Object.values(groups).find((g) => g.folder === groupFolder);
+  const mounts: ExtraMount[] = group?.extraMounts ?? [];
+  const args: string[] = [];
+  for (const mount of mounts) {
+    if (!mount.hostPath || !mount.containerPath) {
+      logger.warn({ groupFolder, mount }, 'Extra mount: empty path, skipping');
+      continue;
+    }
+    const suffix = mount.readOnly ? ':ro' : '';
+    args.push('-v', `${mount.hostPath}:${mount.containerPath}${suffix}`);
+  }
+  return args;
+}
+
 const DOCKER_NETWORK = process.env['DOCKER_NETWORK'] ?? 'openbob';
 // DATA_PATH: absolute path on the Docker host (same value used in compose bind mount)
 const DATA_PATH_HOST = process.env['DATA_PATH'] ?? DATA_DIR;
@@ -517,6 +545,8 @@ async function spawnContainer(
     ...(SKILLS_PATH_HOST
       ? ['-v', `${SKILLS_PATH_HOST}:/workspace/skills:ro`]
       : []),
+    // Extra mounts — per-group host directories
+    ...buildExtraMountArgs(groupFolder),
     // Labels for cleanup
     '--label',
     `openbob.group=${groupFolder}`,

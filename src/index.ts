@@ -562,6 +562,24 @@ async function main(): Promise<void> {
               'Failed to restart container after model change',
             ),
           );
+      } else if (
+        JSON.stringify(previousConfig?.extraMounts ?? null) !==
+        JSON.stringify(config.extraMounts ?? null)
+      ) {
+        logger.info(
+          { folder: config.folder },
+          'Extra mounts changed — restarting agent container',
+        );
+        stopGroupContainer(config.folder)
+          .then(() =>
+            warmUpContainers([{ folder: config.folder, model: newModel }]),
+          )
+          .catch((err) =>
+            logger.warn(
+              { folder: config.folder, err },
+              'Failed to restart container after mount change',
+            ),
+          );
       }
     },
     onGroupDeleted: (folder, jid) => {

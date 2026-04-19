@@ -349,6 +349,11 @@ export async function processTaskIpc(
     isMain?: boolean;
     alwaysRespond?: boolean;
     model?: string | null;
+    extraMounts?: Array<{
+      hostPath: string;
+      containerPath: string;
+      readOnly: boolean;
+    }> | null;
     // switch_session
     sessionId?: string;
   },
@@ -572,6 +577,7 @@ export async function processTaskIpc(
           is_main: g.isMain,
           always_respond: g.alwaysRespond,
           model: g.model ?? null,
+          extra_mounts: g.extraMounts ?? null,
         }));
       const responseDir = path.join(GROUPS_DIR, sourceGroup, 'ipc', 'input');
       fs.mkdirSync(responseDir, { recursive: true });
@@ -716,6 +722,9 @@ export async function processTaskIpc(
         alwaysRespond: data.alwaysRespond === true || data.isMain === true,
         createdAt: Date.now(),
         ...(data.model !== undefined && { model: data.model || null }),
+        ...(data.extraMounts !== undefined && {
+          extraMounts: data.extraMounts,
+        }),
       };
       setRegisteredGroup(config);
       deps.onGroupRegistered(config);
@@ -822,6 +831,9 @@ export async function processTaskIpc(
         }),
         ...(data.isMain !== undefined && { isMain: data.isMain }),
         ...(data.model !== undefined && { model: data.model || null }),
+        ...(data.extraMounts !== undefined && {
+          extraMounts: data.extraMounts,
+        }),
       };
       // Only call setRegisteredGroup for non-jid changes (jid was already migrated above)
       if (!oldJid) {

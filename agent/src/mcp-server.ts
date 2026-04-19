@@ -582,6 +582,18 @@ Get the channel JID from the user — format: "tg:<chat-id>" for Telegram or "mx
       .describe(
         'Per-group model override, e.g. "anthropic/claude-sonnet-4-6". Omit to use the global default.',
       ),
+    extra_mounts: z
+      .array(
+        z.object({
+          host_path: z.string().describe('Absolute path on the host machine'),
+          container_path: z
+            .string()
+            .describe('Absolute path inside the agent container'),
+          read_only: z.boolean().describe('Mount as read-only when true'),
+        }),
+      )
+      .optional()
+      .describe('Host directories to bind-mount into the agent container.'),
   },
   async (args: {
     jid: string;
@@ -590,6 +602,11 @@ Get the channel JID from the user — format: "tg:<chat-id>" for Telegram or "mx
     trigger: string;
     always_respond?: boolean;
     model?: string;
+    extra_mounts?: Array<{
+      host_path: string;
+      container_path: string;
+      read_only: boolean;
+    }>;
   }) => {
     const ctx = readContext();
     if (!ctx.isMain) {
@@ -611,6 +628,13 @@ Get the channel JID from the user — format: "tg:<chat-id>" for Telegram or "mx
       trigger: args.trigger,
       alwaysRespond: args.always_respond ?? false,
       ...(args.model !== undefined && { model: args.model || null }),
+      ...(args.extra_mounts !== undefined && {
+        extraMounts: args.extra_mounts.map((m) => ({
+          hostPath: m.host_path,
+          containerPath: m.container_path,
+          readOnly: m.read_only,
+        })),
+      }),
       timestamp: new Date().toISOString(),
     });
     return {
@@ -645,6 +669,20 @@ Identify the group by its folder name. You can change any field including the JI
       .describe(
         'Per-group model override. Set to empty string to clear and use global default.',
       ),
+    extra_mounts: z
+      .array(
+        z.object({
+          host_path: z.string().describe('Absolute path on the host machine'),
+          container_path: z
+            .string()
+            .describe('Absolute path inside the agent container'),
+          read_only: z.boolean().describe('Mount as read-only when true'),
+        }),
+      )
+      .optional()
+      .describe(
+        'Host directories to bind-mount into the agent container. Replaces existing mounts. Set to empty array to clear.',
+      ),
   },
   async (args: {
     folder: string;
@@ -653,6 +691,11 @@ Identify the group by its folder name. You can change any field including the JI
     trigger?: string;
     always_respond?: boolean;
     model?: string;
+    extra_mounts?: Array<{
+      host_path: string;
+      container_path: string;
+      read_only: boolean;
+    }>;
   }) => {
     const ctx = readContext();
     if (!ctx.isMain) {
@@ -677,6 +720,12 @@ Identify the group by its folder name. You can change any field including the JI
     if (args.always_respond !== undefined)
       data.alwaysRespond = args.always_respond;
     if (args.model !== undefined) data.model = args.model || null; // empty string → null → clear override
+    if (args.extra_mounts !== undefined)
+      data.extraMounts = args.extra_mounts.map((m) => ({
+        hostPath: m.host_path,
+        containerPath: m.container_path,
+        readOnly: m.read_only,
+      }));
     writeIpcFile(TASKS_DIR, data);
     return {
       content: [{ type: 'text' as const, text: `Group update submitted.` }],

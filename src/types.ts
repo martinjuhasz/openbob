@@ -62,6 +62,15 @@ export interface SendOptions {
   replyToId?: string;
 }
 
+export interface ExtraMount {
+  /** Absolute path on the host machine. */
+  hostPath: string;
+  /** Absolute path inside the agent container. */
+  containerPath: string;
+  /** Mount as read-only when true. */
+  readOnly: boolean;
+}
+
 export interface GroupConfig {
   jid: string;
   folder: string;
@@ -73,6 +82,8 @@ export interface GroupConfig {
   createdAt: number;
   /** Per-group model override. Null/undefined = use global MODEL env var. */
   model?: string | null;
+  /** Additional host directories to bind-mount into the agent container. */
+  extraMounts?: ExtraMount[] | null;
 }
 
 export interface ScheduledTask {

@@ -6,7 +6,7 @@ import path from 'path';
 
 import { DB_PATH } from './config.js';
 import { logger } from './logger.js';
-import { GroupConfig, NewMessage, ScheduledTask } from './types.js';
+import { ExtraMount, GroupConfig, NewMessage, ScheduledTask } from './types.js';
 
 let db: Database.Database;
 
@@ -104,6 +104,12 @@ export function initDatabase(): void {
       `ALTER TABLE registered_groups ADD COLUMN ov_user_key TEXT`,
     ).run();
   }
+  // Migration: add extra_mounts column if missing (JSON array of bind mounts)
+  if (!cols.includes('extra_mounts')) {
+    db.prepare(
+      `ALTER TABLE registered_groups ADD COLUMN extra_mounts TEXT`,
+    ).run();
+  }
   logger.info({ dbPath: DB_PATH }, 'Database initialised');
 }
 
@@ -179,6 +185,27 @@ export function storeChatMetadata(
   ).run(jid, name ?? null, channel ?? null, isGroup ? 1 : 0, lastMessageTime);
 }
 
+// --- Extra mounts helpers ---
+
+function parseExtraMounts(raw: string | null): ExtraMount[] | undefined {
+  if (!raw) return undefined;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return undefined;
+    return parsed as ExtraMount[];
+    // eslint-disable-next-line no-catch-all/no-catch-all -- malformed JSON in DB
+  } catch {
+    return undefined;
+  }
+}
+
+function serializeExtraMounts(
+  mounts: ExtraMount[] | null | undefined,
+): string | null {
+  if (!mounts || mounts.length === 0) return null;
+  return JSON.stringify(mounts);
+}
+
 // --- Registered groups ---
 
 export function getAllRegisteredGroups(): Record<string, GroupConfig> {
@@ -191,6 +218,7 @@ export function getAllRegisteredGroups(): Record<string, GroupConfig> {
     is_main: number;
     always_respond: number;
     model: string | null;
+    extra_mounts: string | null;
     created_at: number;
   }>;
   const result: Record<string, GroupConfig> = {};
@@ -204,6 +232,7 @@ export function getAllRegisteredGroups(): Record<string, GroupConfig> {
       isMain: row.is_main === 1,
       alwaysRespond: row.always_respond === 1,
       model: row.model ?? undefined,
+      extraMounts: parseExtraMounts(row.extra_mounts),
       createdAt: row.created_at,
     };
   }
@@ -213,8 +242,8 @@ export function getAllRegisteredGroups(): Record<string, GroupConfig> {
 export function setRegisteredGroup(config: GroupConfig): void {
   db.prepare(
     `
-    INSERT INTO registered_groups (jid, name, folder, trigger, channel, is_main, always_respond, model, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO registered_groups (jid, name, folder, trigger, channel, is_main, always_respond, model, extra_mounts, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(jid) DO UPDATE SET
       name           = excluded.name,
       folder         = excluded.folder,
@@ -222,7 +251,8 @@ export function setRegisteredGroup(config: GroupConfig): void {
       channel        = excluded.channel,
       is_main        = excluded.is_main,
       always_respond = excluded.always_respond,
-      model          = excluded.model
+      model          = excluded.model,
+      extra_mounts   = excluded.extra_mounts
   `,
   ).run(
     config.jid,
@@ -233,6 +263,7 @@ export function setRegisteredGroup(config: GroupConfig): void {
     config.isMain ? 1 : 0,
     config.alwaysRespond ? 1 : 0,
     config.model ?? null,
+    serializeExtraMounts(config.extraMounts),
     config.createdAt,
   );
 }
