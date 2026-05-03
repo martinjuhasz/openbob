@@ -16,5 +16,6 @@ export function parseCommand(text: string): Command | null {
   const cmd = match[1].toLowerCase();
   if (cmd === 'new' || cmd === 'reset') return 'new';
   if (cmd === 'stop') return 'stop';
+  if (cmd === 'restart') return 'restart';
   return null;
 }

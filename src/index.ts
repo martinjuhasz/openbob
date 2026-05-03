@@ -416,6 +416,31 @@ async function main(): Promise<void> {
         }
         logger.info({ group: group.name }, 'stop: agent session aborted');
       }
+
+      if (command === 'restart') {
+        abortAgentSession(group.folder);
+        stopGroupContainer(group.folder).catch((err: unknown) =>
+          logger.warn(
+            { groupFolder: group.folder, err },
+            'Failed to stop container during restart',
+          ),
+        );
+        const channel = findChannel(channels, chatJid);
+        if (channel) {
+          channel
+            .sendMessage(chatJid, '🔄 Container wird neu gestartet.')
+            .catch((err: unknown) =>
+              logger.warn(
+                { chatJid, err },
+                'Failed to send restart confirmation',
+              ),
+            );
+        }
+        logger.info(
+          { group: group.name },
+          'restart: container stopped, will restart on next message',
+        );
+      }
     },
     onGroupMigrated: (oldJid: string, newJid: string) => {
       const migrated = migrateGroupJid(oldJid, newJid);
