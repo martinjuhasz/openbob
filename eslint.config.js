@@ -4,8 +4,8 @@ import tseslint from 'typescript-eslint'
 import noCatchAll from 'eslint-plugin-no-catch-all'
 
 export default [
-  { ignores: ['node_modules/', 'dist/', 'agent/'] },
-  { files: ['src/**/*.{js,ts}'] },
+  { ignores: ['node_modules/', 'dist/', 'agent/node_modules/', 'agent/dist/'] },
+  { files: ['src/**/*.{js,ts}', 'agent/src/**/*.{js,ts}'] },
   { languageOptions: { globals: globals.node } },
   pluginJs.configs.recommended,
   ...tseslint.configs.recommended,

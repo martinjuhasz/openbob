@@ -815,9 +815,7 @@ Users can also type /reset in chat to trigger this directly.`,
       };
     }
     return {
-      content: [
-        { type: 'text' as const, text: 'Failed to reset session.' },
-      ],
+      content: [{ type: 'text' as const, text: 'Failed to reset session.' }],
       isError: true,
     };
   },
@@ -865,9 +863,7 @@ Shows session IDs, titles, and creation timestamps. Use switch_session to change
       };
     }
     const lines = data.sessions.map((s) => {
-      const created = s.created
-        ? new Date(s.created).toISOString()
-        : 'unknown';
+      const created = s.created ? new Date(s.created).toISOString() : 'unknown';
       const activeMarker = s.active ? ' ← active' : '';
       return [
         `ID: ${s.id}${activeMarker}`,
@@ -957,7 +953,10 @@ interface ComposeResponse {
 async function composeRequest(
   action: string,
   options: Record<string, unknown> = {},
-): Promise<{ content: Array<{ type: 'text'; text: string }>; isError?: boolean }> {
+): Promise<{
+  content: Array<{ type: 'text'; text: string }>;
+  isError?: boolean;
+}> {
   const requestId = generateRequestId();
   writeIpcFile(TASKS_DIR, {
     type: 'compose',
@@ -968,22 +967,42 @@ async function composeRequest(
   });
 
   // Compose commands can take longer (especially build)
-  const timeout = action === 'build' ? 300_000 : action === 'up' || action === 'restart' ? 120_000 : 30_000;
+  const timeout =
+    action === 'build'
+      ? 300_000
+      : action === 'up' || action === 'restart'
+        ? 120_000
+        : 30_000;
   const data = await pollIpcResponse<ComposeResponse>(requestId, timeout);
 
   if (!data) {
     return {
-      content: [{ type: 'text' as const, text: `Timeout waiting for compose ${action} response.` }],
+      content: [
+        {
+          type: 'text' as const,
+          text: `Timeout waiting for compose ${action} response.`,
+        },
+      ],
       isError: true,
     };
   }
   if (data.success) {
     return {
-      content: [{ type: 'text' as const, text: data.output ?? `compose ${action} completed.` }],
+      content: [
+        {
+          type: 'text' as const,
+          text: data.output ?? `compose ${action} completed.`,
+        },
+      ],
     };
   }
   return {
-    content: [{ type: 'text' as const, text: `compose ${action} failed:\n${data.error ?? 'unknown error'}` }],
+    content: [
+      {
+        type: 'text' as const,
+        text: `compose ${action} failed:\n${data.error ?? 'unknown error'}`,
+      },
+    ],
     isError: true,
   };
 }
@@ -1018,7 +1037,9 @@ Optionally remove associated volumes.`,
   },
   async (args: { remove_volumes?: boolean }) => {
     return composeRequest('down', {
-      ...(args.remove_volumes !== undefined && { removeVolumes: args.remove_volumes }),
+      ...(args.remove_volumes !== undefined && {
+        removeVolumes: args.remove_volumes,
+      }),
     });
   },
 );
