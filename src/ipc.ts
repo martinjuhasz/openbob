@@ -29,7 +29,13 @@ import {
   upsertTask,
 } from './db.js';
 import { listAgentSessions, validateAgentSession } from './container-runner.js';
+import { handleComposeIpc } from './compose.js';
 import { logger } from './logger.js';
+import {
+  messageIpcSchema,
+  taskIpcSchema,
+  type TaskIpcMessage,
+} from './ipc-schemas.js';
 import { GroupConfig, ScheduledTask } from './types.js';
 
 export interface IpcDeps {
@@ -94,6 +100,23 @@ export function formatIpcOutbound(text: string, sender?: string): string {
   return sender ? `[${sender}]: ${text}` : text;
 }
 
+/**
+ * Write a JSON response to the IPC input directory for the agent to poll.
+ * Uses atomic write (write to .tmp then rename) to prevent partial reads.
+ */
+export function writeIpcResponse(
+  sourceGroup: string,
+  requestId: string,
+  data: unknown,
+): void {
+  const responseDir = path.join(GROUPS_DIR, sourceGroup, 'ipc', 'input');
+  fs.mkdirSync(responseDir, { recursive: true });
+  const responsePath = path.join(responseDir, `${requestId}.json`);
+  const tempPath = `${responsePath}.tmp`;
+  fs.writeFileSync(tempPath, JSON.stringify(data));
+  fs.renameSync(tempPath, responsePath);
+}
+
 let ipcWatcherRunning = false;
 
 export function startIpcWatcher(deps: IpcDeps): void {
@@ -143,8 +166,19 @@ export function startIpcWatcher(deps: IpcDeps): void {
           for (const file of files) {
             const filePath = path.join(messagesDir, file);
             try {
-              const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
-              if (data.type === 'message' && data.chatJid && data.text) {
+              const raw = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+              const parsed = messageIpcSchema.safeParse(raw);
+              if (!parsed.success) {
+                logger.warn(
+                  { file, sourceGroup, errors: parsed.error.issues },
+                  'IPC message validation failed',
+                );
+                fs.unlinkSync(filePath);
+                continue;
+              }
+              const data = parsed.data;
+
+              if (data.type === 'message') {
                 const targetGroup = registeredGroups[data.chatJid];
                 if (
                   isMain ||
@@ -164,11 +198,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
                     'Unauthorized IPC message attempt blocked',
                   );
                 }
-              } else if (
-                data.type === 'send_photo' &&
-                data.chatJid &&
-                data.source
-              ) {
+              } else if (data.type === 'send_photo') {
                 const targetGroup = registeredGroups[data.chatJid];
                 if (
                   isMain ||
@@ -209,11 +239,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
                     'Unauthorized IPC send_photo attempt blocked',
                   );
                 }
-              } else if (
-                data.type === 'send_document' &&
-                data.chatJid &&
-                data.source
-              ) {
+              } else if (data.type === 'send_document') {
                 const targetGroup = registeredGroups[data.chatJid];
                 if (
                   isMain ||
@@ -283,9 +309,18 @@ export function startIpcWatcher(deps: IpcDeps): void {
           for (const file of files) {
             const filePath = path.join(tasksDir, file);
             try {
-              const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+              const raw = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+              const parsed = taskIpcSchema.safeParse(raw);
+              if (!parsed.success) {
+                logger.warn(
+                  { file, sourceGroup, errors: parsed.error.issues },
+                  'IPC task validation failed',
+                );
+                moveToErrors(filePath, sourceGroup, file);
+                continue;
+              }
               await processTaskIpc(
-                data,
+                parsed.data,
                 sourceGroup,
                 isMain,
                 folderToJid,
@@ -331,32 +366,7 @@ function moveToErrors(
 }
 
 export async function processTaskIpc(
-  data: {
-    type: string;
-    taskId?: string;
-    prompt?: string;
-    scheduleType?: string;
-    scheduleValue?: string;
-    contextMode?: string;
-    targetJid?: string;
-    // list_tasks request-response
-    requestId?: string;
-    // register_group / update_group fields
-    jid?: string;
-    name?: string;
-    folder?: string;
-    trigger?: string;
-    isMain?: boolean;
-    alwaysRespond?: boolean;
-    model?: string | null;
-    extraMounts?: Array<{
-      hostPath: string;
-      containerPath: string;
-      readOnly: boolean;
-    }> | null;
-    // switch_session
-    sessionId?: string;
-  },
+  data: TaskIpcMessage,
   sourceGroup: string,
   isMain: boolean,
   _folderToJid: Map<string, string>,
@@ -366,19 +376,6 @@ export async function processTaskIpc(
 
   switch (data.type) {
     case 'schedule_task': {
-      if (
-        !data.prompt ||
-        !data.scheduleType ||
-        !data.scheduleValue ||
-        !data.targetJid
-      ) {
-        logger.warn(
-          { data, sourceGroup },
-          'schedule_task missing required fields',
-        );
-        break;
-      }
-
       const targetGroup = registeredGroups[data.targetJid];
       if (!targetGroup) {
         logger.warn(
@@ -397,7 +394,7 @@ export async function processTaskIpc(
         break;
       }
 
-      const scheduleType = data.scheduleType as 'cron' | 'interval' | 'once';
+      const scheduleType = data.scheduleType;
       let nextRun: number;
 
       if (scheduleType === 'cron') {
@@ -469,7 +466,6 @@ export async function processTaskIpc(
     }
 
     case 'cancel_task': {
-      if (!data.taskId) break;
       const tasks = getActiveTasks();
       const task = tasks.find((t) => t.id === data.taskId);
       if (task && (isMain || task.group_folder === sourceGroup)) {
@@ -489,7 +485,6 @@ export async function processTaskIpc(
     }
 
     case 'pause_task': {
-      if (!data.taskId) break;
       const tasks = getActiveTasks();
       const task = tasks.find((t) => t.id === data.taskId);
       if (task && (isMain || task.group_folder === sourceGroup)) {
@@ -509,7 +504,6 @@ export async function processTaskIpc(
     }
 
     case 'resume_task': {
-      if (!data.taskId) break;
       const task = getTaskById(data.taskId);
       if (
         task &&
@@ -548,14 +542,8 @@ export async function processTaskIpc(
     }
 
     case 'list_tasks': {
-      if (!data.requestId) break;
       const tasks = isMain ? getAllTasks() : getTasksForGroup(sourceGroup);
-      const responseDir = path.join(GROUPS_DIR, sourceGroup, 'ipc', 'input');
-      fs.mkdirSync(responseDir, { recursive: true });
-      const responsePath = path.join(responseDir, `${data.requestId}.json`);
-      const tempPath = `${responsePath}.tmp`;
-      fs.writeFileSync(tempPath, JSON.stringify({ tasks }));
-      fs.renameSync(tempPath, responsePath);
+      writeIpcResponse(sourceGroup, data.requestId, { tasks });
       logger.debug(
         { sourceGroup, requestId: data.requestId, count: tasks.length },
         'list_tasks response written',
@@ -564,7 +552,6 @@ export async function processTaskIpc(
     }
 
     case 'list_groups': {
-      if (!data.requestId) break;
       const allGroups = getAllRegisteredGroups();
       const groupList = Object.values(allGroups)
         .filter((g) => isMain || g.folder === sourceGroup)
@@ -579,12 +566,7 @@ export async function processTaskIpc(
           model: g.model ?? null,
           extra_mounts: g.extraMounts ?? null,
         }));
-      const responseDir = path.join(GROUPS_DIR, sourceGroup, 'ipc', 'input');
-      fs.mkdirSync(responseDir, { recursive: true });
-      const responsePath = path.join(responseDir, `${data.requestId}.json`);
-      const tempPath = `${responsePath}.tmp`;
-      fs.writeFileSync(tempPath, JSON.stringify({ groups: groupList }));
-      fs.renameSync(tempPath, responsePath);
+      writeIpcResponse(sourceGroup, data.requestId, { groups: groupList });
       logger.debug(
         { sourceGroup, requestId: data.requestId, count: groupList.length },
         'list_groups response written',
@@ -593,7 +575,6 @@ export async function processTaskIpc(
     }
 
     case 'update_task': {
-      if (!data.taskId) break;
       const task = getTaskById(data.taskId);
       if (!task) {
         logger.warn(
@@ -679,13 +660,6 @@ export async function processTaskIpc(
         );
         break;
       }
-      if (!data.jid || !data.name || !data.folder || !data.trigger) {
-        logger.warn(
-          { data, sourceGroup },
-          'register_group: missing required fields (jid, name, folder, trigger)',
-        );
-        break;
-      }
       if (!isValidGroupFolder(data.folder)) {
         logger.warn(
           { folder: data.folder, sourceGroup },
@@ -743,10 +717,6 @@ export async function processTaskIpc(
         );
         break;
       }
-      if (!data.folder) {
-        logger.warn({ sourceGroup }, 'delete_group: missing folder');
-        break;
-      }
       const existing = deps.registeredGroups();
       const group = Object.values(existing).find(
         (g) => g.folder === data.folder,
@@ -777,10 +747,6 @@ export async function processTaskIpc(
           { sourceGroup },
           'update_group: only main group is allowed',
         );
-        break;
-      }
-      if (!data.folder) {
-        logger.warn({ sourceGroup }, 'update_group: missing folder');
         break;
       }
       const existing = deps.registeredGroups();
@@ -860,20 +826,13 @@ export async function processTaskIpc(
     }
 
     case 'reset_session': {
-      if (!data.requestId) break;
       deleteSession(sourceGroup);
-      const responseDir = path.join(GROUPS_DIR, sourceGroup, 'ipc', 'input');
-      fs.mkdirSync(responseDir, { recursive: true });
-      const responsePath = path.join(responseDir, `${data.requestId}.json`);
-      const tempPath = `${responsePath}.tmp`;
-      fs.writeFileSync(tempPath, JSON.stringify({ success: true }));
-      fs.renameSync(tempPath, responsePath);
+      writeIpcResponse(sourceGroup, data.requestId, { success: true });
       logger.info({ sourceGroup }, 'Session reset via IPC');
       break;
     }
 
     case 'list_sessions': {
-      if (!data.requestId) break;
       let sessions: Array<{
         id: string;
         title?: string;
@@ -893,15 +852,9 @@ export async function processTaskIpc(
         ...s,
         active: s.id === activeSessionId,
       }));
-      const responseDir = path.join(GROUPS_DIR, sourceGroup, 'ipc', 'input');
-      fs.mkdirSync(responseDir, { recursive: true });
-      const responsePath = path.join(responseDir, `${data.requestId}.json`);
-      const tempPath = `${responsePath}.tmp`;
-      fs.writeFileSync(
-        tempPath,
-        JSON.stringify({ sessions: sessionsWithActive }),
-      );
-      fs.renameSync(tempPath, responsePath);
+      writeIpcResponse(sourceGroup, data.requestId, {
+        sessions: sessionsWithActive,
+      });
       logger.debug(
         { sourceGroup, requestId: data.requestId, count: sessions.length },
         'list_sessions response written',
@@ -910,17 +863,11 @@ export async function processTaskIpc(
     }
 
     case 'switch_session': {
-      if (!data.requestId) break;
       if (!data.sessionId) {
-        const responseDir = path.join(GROUPS_DIR, sourceGroup, 'ipc', 'input');
-        fs.mkdirSync(responseDir, { recursive: true });
-        const responsePath = path.join(responseDir, `${data.requestId}.json`);
-        const tempPath = `${responsePath}.tmp`;
-        fs.writeFileSync(
-          tempPath,
-          JSON.stringify({ success: false, error: 'missing sessionId' }),
-        );
-        fs.renameSync(tempPath, responsePath);
+        writeIpcResponse(sourceGroup, data.requestId, {
+          success: false,
+          error: 'missing sessionId',
+        });
         break;
       }
       let valid = false;
@@ -933,35 +880,40 @@ export async function processTaskIpc(
           'switch_session: validation failed',
         );
       }
-      const responseDir = path.join(GROUPS_DIR, sourceGroup, 'ipc', 'input');
-      fs.mkdirSync(responseDir, { recursive: true });
-      const responsePath = path.join(responseDir, `${data.requestId}.json`);
-      const tempPath = `${responsePath}.tmp`;
       if (valid) {
         setSession(sourceGroup, data.sessionId);
-        fs.writeFileSync(
-          tempPath,
-          JSON.stringify({ success: true, sessionId: data.sessionId }),
-        );
+        writeIpcResponse(sourceGroup, data.requestId, {
+          success: true,
+          sessionId: data.sessionId,
+        });
         logger.info(
           { sourceGroup, sessionId: data.sessionId },
           'Session switched via IPC',
         );
       } else {
-        fs.writeFileSync(
-          tempPath,
-          JSON.stringify({ success: false, error: 'session not found' }),
-        );
+        writeIpcResponse(sourceGroup, data.requestId, {
+          success: false,
+          error: 'session not found',
+        });
         logger.warn(
           { sourceGroup, sessionId: data.sessionId },
           'switch_session: session not found',
         );
       }
-      fs.renameSync(tempPath, responsePath);
+      break;
+    }
+
+    case 'compose': {
+      const result = await handleComposeIpc(data, sourceGroup);
+      writeIpcResponse(sourceGroup, data.requestId, result);
+      logger.info(
+        { sourceGroup, action: data.action, success: result.success },
+        'Compose action via IPC',
+      );
       break;
     }
 
     default:
-      logger.warn({ type: data.type, sourceGroup }, 'Unknown IPC task type');
+      logger.warn({ type: data, sourceGroup }, 'Unknown IPC task type');
   }
 }

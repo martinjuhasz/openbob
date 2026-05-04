@@ -3,6 +3,7 @@ import {
   processTaskIpc,
   resolveContainerPath,
   formatIpcOutbound,
+  writeIpcResponse,
   IpcDeps,
 } from './ipc.js';
 import { GroupConfig } from './types.js';
@@ -29,6 +30,11 @@ vi.mock('./db.js', () => ({
 vi.mock('./container-runner.js', () => ({
   listAgentSessions: vi.fn(async () => []),
   validateAgentSession: vi.fn(async () => false),
+}));
+
+// Mock the compose module
+vi.mock('./compose.js', () => ({
+  handleComposeIpc: vi.fn(async () => ({ success: true, output: 'ok' })),
 }));
 
 // Mock fs for list_tasks response file writing
@@ -65,6 +71,7 @@ import {
 } from './db.js';
 
 import { listAgentSessions, validateAgentSession } from './container-runner.js';
+import { handleComposeIpc } from './compose.js';
 
 function makeGroup(overrides: Partial<GroupConfig> = {}): GroupConfig {
   return {
@@ -250,19 +257,6 @@ describe('processTaskIpc', () => {
     expect(deleteTask).not.toHaveBeenCalled();
   });
 
-  it('logs warning for unknown IPC type', async () => {
-    const deps = makeDeps();
-    const folderToJid = new Map<string, string>();
-    // Should not throw
-    await processTaskIpc(
-      { type: 'unknown_type' },
-      'test-group',
-      false,
-      folderToJid,
-      deps,
-    );
-  });
-
   describe('register_group', () => {
     it('registers a new group from main group', async () => {
       const deps = makeDeps({});
@@ -364,18 +358,6 @@ describe('processTaskIpc', () => {
           folder: 'taken',
           trigger: 'Bob',
         },
-        'main-group',
-        true,
-        new Map(),
-        deps,
-      );
-      expect(setRegisteredGroup).not.toHaveBeenCalled();
-    });
-
-    it('blocks registration with missing fields', async () => {
-      const deps = makeDeps({});
-      await processTaskIpc(
-        { type: 'register_group', jid: 'tg:new' }, // missing name, folder, trigger
         'main-group',
         true,
         new Map(),
@@ -536,21 +518,6 @@ describe('processTaskIpc', () => {
       );
       expect(writtenData.tasks).toHaveLength(1);
       expect(writtenData.tasks[0].id).toBe('task-1');
-    });
-
-    it('does nothing without requestId', async () => {
-      const deps = makeDeps({});
-      await processTaskIpc(
-        { type: 'list_tasks' },
-        'main-group',
-        true,
-        new Map(),
-        deps,
-      );
-
-      expect(getAllTasks).not.toHaveBeenCalled();
-      expect(getTasksForGroup).not.toHaveBeenCalled();
-      expect(fs.writeFileSync).not.toHaveBeenCalled();
     });
   });
 
@@ -722,20 +689,6 @@ describe('processTaskIpc', () => {
 
       expect(updateTask).not.toHaveBeenCalled();
       expect(deps.tasksChanged).toHaveLength(0);
-    });
-
-    it('does nothing without taskId', async () => {
-      const deps = makeDeps({});
-      await processTaskIpc(
-        { type: 'update_task', prompt: 'no id' },
-        'group-a',
-        false,
-        new Map(),
-        deps,
-      );
-
-      expect(getTaskById).not.toHaveBeenCalled();
-      expect(updateTask).not.toHaveBeenCalled();
     });
 
     it('rejects invalid cron expression', async () => {
@@ -1051,18 +1004,6 @@ describe('processTaskIpc', () => {
       expect(parsed.groups).toHaveLength(1);
       expect(parsed.groups[0]?.folder).toBe('home');
     });
-
-    it('skips when requestId is missing', async () => {
-      const deps = makeDeps({});
-      await processTaskIpc(
-        { type: 'list_groups' },
-        'admin',
-        true,
-        new Map(),
-        deps,
-      );
-      expect(fs.writeFileSync).not.toHaveBeenCalled();
-    });
   });
 
   describe('delete_group', () => {
@@ -1158,19 +1099,6 @@ describe('processTaskIpc', () => {
       expect(writtenData.success).toBe(true);
       expect(fs.renameSync).toHaveBeenCalledOnce();
     });
-
-    it('skips when requestId is missing', async () => {
-      const deps = makeDeps({});
-      await processTaskIpc(
-        { type: 'reset_session' },
-        'test-group',
-        false,
-        new Map(),
-        deps,
-      );
-      expect(deleteSession).not.toHaveBeenCalled();
-      expect(fs.writeFileSync).not.toHaveBeenCalled();
-    });
   });
 
   describe('list_sessions', () => {
@@ -1221,19 +1149,6 @@ describe('processTaskIpc', () => {
         vi.mocked(fs.writeFileSync).mock.calls[0]?.[1] as string,
       );
       expect(writtenData.sessions).toHaveLength(0);
-    });
-
-    it('skips when requestId is missing', async () => {
-      const deps = makeDeps({});
-      await processTaskIpc(
-        { type: 'list_sessions' },
-        'test-group',
-        false,
-        new Map(),
-        deps,
-      );
-      expect(listAgentSessions).not.toHaveBeenCalled();
-      expect(fs.writeFileSync).not.toHaveBeenCalled();
     });
   });
 
@@ -1302,19 +1217,6 @@ describe('processTaskIpc', () => {
       expect(writtenData.error).toBe('missing sessionId');
     });
 
-    it('skips when requestId is missing', async () => {
-      const deps = makeDeps({});
-      await processTaskIpc(
-        { type: 'switch_session', sessionId: 'sess-1' },
-        'test-group',
-        false,
-        new Map(),
-        deps,
-      );
-      expect(validateAgentSession).not.toHaveBeenCalled();
-      expect(fs.writeFileSync).not.toHaveBeenCalled();
-    });
-
     it('returns error when validation throws', async () => {
       vi.mocked(validateAgentSession).mockRejectedValue(
         new Error('container down'),
@@ -1333,6 +1235,64 @@ describe('processTaskIpc', () => {
       );
       expect(writtenData.success).toBe(false);
       expect(writtenData.error).toBe('session not found');
+    });
+  });
+
+  describe('compose', () => {
+    it('delegates to handleComposeIpc and writes response', async () => {
+      vi.mocked(handleComposeIpc).mockResolvedValue({
+        success: true,
+        output: 'Container started',
+      });
+      const deps = makeDeps({});
+      await processTaskIpc(
+        { type: 'compose', action: 'up', requestId: 'req-c1' },
+        'test-group',
+        false,
+        new Map(),
+        deps,
+      );
+      expect(handleComposeIpc).toHaveBeenCalledWith(
+        { type: 'compose', action: 'up', requestId: 'req-c1' },
+        'test-group',
+      );
+      expect(fs.writeFileSync).toHaveBeenCalledOnce();
+      const writtenData = JSON.parse(
+        vi.mocked(fs.writeFileSync).mock.calls[0]?.[1] as string,
+      );
+      expect(writtenData.success).toBe(true);
+      expect(writtenData.output).toBe('Container started');
+    });
+
+    it('passes services and options to handleComposeIpc', async () => {
+      vi.mocked(handleComposeIpc).mockResolvedValue({
+        success: true,
+        output: 'ok',
+      });
+      const deps = makeDeps({});
+      await processTaskIpc(
+        {
+          type: 'compose',
+          action: 'logs',
+          requestId: 'req-c2',
+          services: ['web'],
+          lines: 50,
+        },
+        'test-group',
+        false,
+        new Map(),
+        deps,
+      );
+      expect(handleComposeIpc).toHaveBeenCalledWith(
+        {
+          type: 'compose',
+          action: 'logs',
+          requestId: 'req-c2',
+          services: ['web'],
+          lines: 50,
+        },
+        'test-group',
+      );
     });
   });
 });
@@ -1413,5 +1373,21 @@ describe('formatIpcOutbound', () => {
 
   it('returns text as-is when sender is empty string', () => {
     expect(formatIpcOutbound('Hello world', '')).toBe('Hello world');
+  });
+});
+
+describe('writeIpcResponse', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('writes response with atomic rename', () => {
+    writeIpcResponse('test-group', 'req-123', { success: true });
+    expect(fs.mkdirSync).toHaveBeenCalled();
+    expect(fs.writeFileSync).toHaveBeenCalledOnce();
+    const writtenPath = vi.mocked(fs.writeFileSync).mock
+      .calls[0]?.[0] as string;
+    expect(writtenPath).toContain('req-123.json.tmp');
+    expect(fs.renameSync).toHaveBeenCalledOnce();
   });
 });

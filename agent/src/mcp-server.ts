@@ -47,6 +47,32 @@ function writeIpcFile(dir: string, data: object): string {
   return filename;
 }
 
+/**
+ * Poll for a response file from the host. Waits up to `timeoutMs` milliseconds.
+ * Returns the parsed JSON or null on timeout.
+ */
+async function pollIpcResponse<T>(
+  requestId: string,
+  timeoutMs = 10_000,
+): Promise<T | null> {
+  const responsePath = path.join(IPC_DIR, 'input', `${requestId}.json`);
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      const raw = fs.readFileSync(responsePath, 'utf-8');
+      fs.unlinkSync(responsePath);
+      return JSON.parse(raw) as T;
+    } catch {
+      await new Promise((r) => setTimeout(r, 250));
+    }
+  }
+  return null;
+}
+
+function generateRequestId(): string {
+  return `req-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
 const server = new McpServer({ name: 'openbob', version: '1.0.0' });
 
 server.tool(
@@ -308,7 +334,7 @@ Main group sees all tasks across groups; other groups see only their own.`,
   {},
   async () => {
     const ctx = readContext();
-    const requestId = `req-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const requestId = generateRequestId();
 
     writeIpcFile(TASKS_DIR, {
       type: 'list_tasks',
@@ -317,65 +343,54 @@ Main group sees all tasks across groups; other groups see only their own.`,
       timestamp: new Date().toISOString(),
     });
 
-    // Poll for response from host
-    const responsePath = path.join(IPC_DIR, 'input', `${requestId}.json`);
-    const deadline = Date.now() + 10_000;
-    while (Date.now() < deadline) {
-      try {
-        const raw = fs.readFileSync(responsePath, 'utf-8');
-        fs.unlinkSync(responsePath);
-        const data = JSON.parse(raw) as {
-          tasks: Array<{
-            id: string;
-            jid: string;
-            group_folder: string;
-            prompt: string;
-            schedule_type: string;
-            schedule_value: string;
-            context_mode: string;
-            status: string;
-            next_run: number;
-            created_at: number;
-            created_by: string;
-          }>;
-        };
-        if (data.tasks.length === 0) {
-          return {
-            content: [{ type: 'text' as const, text: 'No scheduled tasks.' }],
-          };
-        }
-        const lines = data.tasks.map((t) => {
-          const next = t.next_run ? new Date(t.next_run).toISOString() : 'n/a';
-          return [
-            `ID: ${t.id}`,
-            `  Group: ${t.group_folder}`,
-            `  Status: ${t.status}`,
-            `  Schedule: ${t.schedule_type} — ${t.schedule_value}`,
-            `  Context: ${t.context_mode}`,
-            `  Next run: ${next}`,
-            `  Prompt: ${t.prompt.length > 120 ? t.prompt.slice(0, 120) + '…' : t.prompt}`,
-          ].join('\n');
-        });
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: `${data.tasks.length} task(s):\n\n${lines.join('\n\n')}`,
-            },
-          ],
-        };
-      } catch {
-        await new Promise((r) => setTimeout(r, 250));
-      }
+    const data = await pollIpcResponse<{
+      tasks: Array<{
+        id: string;
+        group_folder: string;
+        prompt: string;
+        schedule_type: string;
+        schedule_value: string;
+        context_mode: string;
+        status: string;
+        next_run: number;
+      }>;
+    }>(requestId);
+
+    if (!data) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: 'Timeout waiting for task list from host.',
+          },
+        ],
+        isError: true,
+      };
     }
+    if (data.tasks.length === 0) {
+      return {
+        content: [{ type: 'text' as const, text: 'No scheduled tasks.' }],
+      };
+    }
+    const lines = data.tasks.map((t) => {
+      const next = t.next_run ? new Date(t.next_run).toISOString() : 'n/a';
+      return [
+        `ID: ${t.id}`,
+        `  Group: ${t.group_folder}`,
+        `  Status: ${t.status}`,
+        `  Schedule: ${t.schedule_type} — ${t.schedule_value}`,
+        `  Context: ${t.context_mode}`,
+        `  Next run: ${next}`,
+        `  Prompt: ${t.prompt.length > 120 ? t.prompt.slice(0, 120) + '…' : t.prompt}`,
+      ].join('\n');
+    });
     return {
       content: [
         {
           type: 'text' as const,
-          text: 'Timeout waiting for task list from host.',
+          text: `${data.tasks.length} task(s):\n\n${lines.join('\n\n')}`,
         },
       ],
-      isError: true,
     };
   },
 );
@@ -387,7 +402,7 @@ Main group sees all groups; other groups see only their own.`,
   {},
   async () => {
     const ctx = readContext();
-    const requestId = `req-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const requestId = generateRequestId();
 
     writeIpcFile(TASKS_DIR, {
       type: 'list_groups',
@@ -396,67 +411,59 @@ Main group sees all groups; other groups see only their own.`,
       timestamp: new Date().toISOString(),
     });
 
-    // Poll for response from host
-    const responsePath = path.join(IPC_DIR, 'input', `${requestId}.json`);
-    const deadline = Date.now() + 10_000;
-    while (Date.now() < deadline) {
-      try {
-        const raw = fs.readFileSync(responsePath, 'utf-8');
-        fs.unlinkSync(responsePath);
-        const data = JSON.parse(raw) as {
-          groups: Array<{
-            jid: string;
-            name: string;
-            folder: string;
-            trigger: string;
-            channel: string;
-            is_main: boolean;
-            always_respond: boolean;
-            model: string | null;
-          }>;
-        };
-        if (data.groups.length === 0) {
-          return {
-            content: [{ type: 'text' as const, text: 'No registered groups.' }],
-          };
-        }
-        const lines = data.groups.map((g) => {
-          const flags = [
-            g.is_main ? 'main' : null,
-            g.always_respond ? 'always-respond' : null,
-          ]
-            .filter(Boolean)
-            .join(', ');
-          return [
-            `Name: ${g.name}`,
-            `  JID: ${g.jid}`,
-            `  Folder: ${g.folder}`,
-            `  Trigger: ${g.trigger}`,
-            `  Channel: ${g.channel}`,
-            ...(g.model ? [`  Model: ${g.model}`] : []),
-            ...(flags ? [`  Flags: ${flags}`] : []),
-          ].join('\n');
-        });
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: `${data.groups.length} group(s):\n\n${lines.join('\n\n')}`,
-            },
-          ],
-        };
-      } catch {
-        await new Promise((r) => setTimeout(r, 250));
-      }
+    const data = await pollIpcResponse<{
+      groups: Array<{
+        jid: string;
+        name: string;
+        folder: string;
+        trigger: string;
+        channel: string;
+        is_main: boolean;
+        always_respond: boolean;
+        model: string | null;
+      }>;
+    }>(requestId);
+
+    if (!data) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: 'Timeout waiting for group list from host.',
+          },
+        ],
+        isError: true,
+      };
     }
+    if (data.groups.length === 0) {
+      return {
+        content: [{ type: 'text' as const, text: 'No registered groups.' }],
+      };
+    }
+    const lines = data.groups.map((g) => {
+      const flags = [
+        g.is_main ? 'main' : null,
+        g.always_respond ? 'always-respond' : null,
+      ]
+        .filter(Boolean)
+        .join(', ');
+      return [
+        `Name: ${g.name}`,
+        `  JID: ${g.jid}`,
+        `  Folder: ${g.folder}`,
+        `  Trigger: ${g.trigger}`,
+        `  Channel: ${g.channel}`,
+        ...(g.model ? [`  Model: ${g.model}`] : []),
+        ...(flags ? [`  Flags: ${flags}`] : []),
+      ].join('\n');
+    });
     return {
       content: [
         {
           type: 'text' as const,
-          text: 'Timeout waiting for group list from host.',
+          text: `${data.groups.length} group(s):\n\n${lines.join('\n\n')}`,
         },
       ],
-      isError: true,
     };
   },
 );
@@ -776,7 +783,7 @@ Users can also type /reset in chat to trigger this directly.`,
   {},
   async () => {
     const ctx = readContext();
-    const requestId = `req-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const requestId = generateRequestId();
 
     writeIpcFile(TASKS_DIR, {
       type: 'reset_session',
@@ -785,40 +792,31 @@ Users can also type /reset in chat to trigger this directly.`,
       timestamp: new Date().toISOString(),
     });
 
-    // Poll for response from host
-    const responsePath = path.join(IPC_DIR, 'input', `${requestId}.json`);
-    const deadline = Date.now() + 10_000;
-    while (Date.now() < deadline) {
-      try {
-        const raw = fs.readFileSync(responsePath, 'utf-8');
-        fs.unlinkSync(responsePath);
-        const data = JSON.parse(raw) as { success: boolean };
-        if (data.success) {
-          return {
-            content: [
-              {
-                type: 'text' as const,
-                text: 'Session reset. The next message will start a fresh conversation.',
-              },
-            ],
-          };
-        }
-        return {
-          content: [
-            { type: 'text' as const, text: 'Failed to reset session.' },
-          ],
-          isError: true,
-        };
-      } catch {
-        await new Promise((r) => setTimeout(r, 250));
-      }
+    const data = await pollIpcResponse<{ success: boolean }>(requestId);
+    if (!data) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: 'Timeout waiting for session reset confirmation.',
+          },
+        ],
+        isError: true,
+      };
+    }
+    if (data.success) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: 'Session reset. The next message will start a fresh conversation.',
+          },
+        ],
+      };
     }
     return {
       content: [
-        {
-          type: 'text' as const,
-          text: 'Timeout waiting for session reset confirmation.',
-        },
+        { type: 'text' as const, text: 'Failed to reset session.' },
       ],
       isError: true,
     };
@@ -832,7 +830,7 @@ Shows session IDs, titles, and creation timestamps. Use switch_session to change
   {},
   async () => {
     const ctx = readContext();
-    const requestId = `req-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const requestId = generateRequestId();
 
     writeIpcFile(TASKS_DIR, {
       type: 'list_sessions',
@@ -841,57 +839,49 @@ Shows session IDs, titles, and creation timestamps. Use switch_session to change
       timestamp: new Date().toISOString(),
     });
 
-    // Poll for response from host
-    const responsePath = path.join(IPC_DIR, 'input', `${requestId}.json`);
-    const deadline = Date.now() + 10_000;
-    while (Date.now() < deadline) {
-      try {
-        const raw = fs.readFileSync(responsePath, 'utf-8');
-        fs.unlinkSync(responsePath);
-        const data = JSON.parse(raw) as {
-          sessions: Array<{
-            id: string;
-            title?: string;
-            created?: number;
-            active?: boolean;
-          }>;
-        };
-        if (data.sessions.length === 0) {
-          return {
-            content: [{ type: 'text' as const, text: 'No sessions found.' }],
-          };
-        }
-        const lines = data.sessions.map((s) => {
-          const created = s.created
-            ? new Date(s.created).toISOString()
-            : 'unknown';
-          const activeMarker = s.active ? ' ← active' : '';
-          return [
-            `ID: ${s.id}${activeMarker}`,
-            `  Title: ${s.title ?? '(untitled)'}`,
-            `  Created: ${created}`,
-          ].join('\n');
-        });
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: `${data.sessions.length} session(s):\n\n${lines.join('\n\n')}`,
-            },
-          ],
-        };
-      } catch {
-        await new Promise((r) => setTimeout(r, 250));
-      }
+    const data = await pollIpcResponse<{
+      sessions: Array<{
+        id: string;
+        title?: string;
+        created?: number;
+        active?: boolean;
+      }>;
+    }>(requestId);
+
+    if (!data) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: 'Timeout waiting for session list from host.',
+          },
+        ],
+        isError: true,
+      };
     }
+    if (data.sessions.length === 0) {
+      return {
+        content: [{ type: 'text' as const, text: 'No sessions found.' }],
+      };
+    }
+    const lines = data.sessions.map((s) => {
+      const created = s.created
+        ? new Date(s.created).toISOString()
+        : 'unknown';
+      const activeMarker = s.active ? ' ← active' : '';
+      return [
+        `ID: ${s.id}${activeMarker}`,
+        `  Title: ${s.title ?? '(untitled)'}`,
+        `  Created: ${created}`,
+      ].join('\n');
+    });
     return {
       content: [
         {
           type: 'text' as const,
-          text: 'Timeout waiting for session list from host.',
+          text: `${data.sessions.length} session(s):\n\n${lines.join('\n\n')}`,
         },
       ],
-      isError: true,
     };
   },
 );
@@ -907,7 +897,7 @@ This restores the conversation history from that session.`,
   },
   async (args: { session_id: string }) => {
     const ctx = readContext();
-    const requestId = `req-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const requestId = generateRequestId();
 
     writeIpcFile(TASKS_DIR, {
       type: 'switch_session',
@@ -917,50 +907,184 @@ This restores the conversation history from that session.`,
       timestamp: new Date().toISOString(),
     });
 
-    // Poll for response from host
-    const responsePath = path.join(IPC_DIR, 'input', `${requestId}.json`);
-    const deadline = Date.now() + 10_000;
-    while (Date.now() < deadline) {
-      try {
-        const raw = fs.readFileSync(responsePath, 'utf-8');
-        fs.unlinkSync(responsePath);
-        const data = JSON.parse(raw) as {
-          success: boolean;
-          sessionId?: string;
-          error?: string;
-        };
-        if (data.success) {
-          return {
-            content: [
-              {
-                type: 'text' as const,
-                text: `Switched to session ${data.sessionId}. The next message will use this session's conversation history.`,
-              },
-            ],
-          };
-        }
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: `Failed to switch session: ${data.error ?? 'unknown error'}`,
-            },
-          ],
-          isError: true,
-        };
-      } catch {
-        await new Promise((r) => setTimeout(r, 250));
-      }
+    const data = await pollIpcResponse<{
+      success: boolean;
+      sessionId?: string;
+      error?: string;
+    }>(requestId);
+
+    if (!data) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: 'Timeout waiting for session switch confirmation.',
+          },
+        ],
+        isError: true,
+      };
+    }
+    if (data.success) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: `Switched to session ${data.sessionId}. The next message will use this session's conversation history.`,
+          },
+        ],
+      };
     }
     return {
       content: [
         {
           type: 'text' as const,
-          text: 'Timeout waiting for session switch confirmation.',
+          text: `Failed to switch session: ${data.error ?? 'unknown error'}`,
         },
       ],
       isError: true,
     };
+  },
+);
+
+// ── Docker Compose tools ──────────────────────────────────────────────
+
+interface ComposeResponse {
+  success: boolean;
+  output?: string;
+  error?: string;
+}
+
+async function composeRequest(
+  action: string,
+  options: Record<string, unknown> = {},
+): Promise<{ content: Array<{ type: 'text'; text: string }>; isError?: boolean }> {
+  const requestId = generateRequestId();
+  writeIpcFile(TASKS_DIR, {
+    type: 'compose',
+    action,
+    requestId,
+    ...options,
+    timestamp: new Date().toISOString(),
+  });
+
+  // Compose commands can take longer (especially build)
+  const timeout = action === 'build' ? 300_000 : action === 'up' || action === 'restart' ? 120_000 : 30_000;
+  const data = await pollIpcResponse<ComposeResponse>(requestId, timeout);
+
+  if (!data) {
+    return {
+      content: [{ type: 'text' as const, text: `Timeout waiting for compose ${action} response.` }],
+      isError: true,
+    };
+  }
+  if (data.success) {
+    return {
+      content: [{ type: 'text' as const, text: data.output ?? `compose ${action} completed.` }],
+    };
+  }
+  return {
+    content: [{ type: 'text' as const, text: `compose ${action} failed:\n${data.error ?? 'unknown error'}` }],
+    isError: true,
+  };
+}
+
+server.tool(
+  'compose_up',
+  `Start Docker Compose services defined in the project's compose file (compose.yml or docker-compose.yml).
+Runs \`docker compose up -d\` in the project directory. Optionally specify which services to start.
+The compose file is validated for security before execution (no privileged containers, no host network, no Docker socket mounts).`,
+  {
+    services: z
+      .array(z.string())
+      .optional()
+      .describe('Specific services to start. Omit to start all services.'),
+  },
+  async (args: { services?: string[] }) => {
+    return composeRequest('up', {
+      ...(args.services?.length && { services: args.services }),
+    });
+  },
+);
+
+server.tool(
+  'compose_down',
+  `Stop and remove Docker Compose services. Runs \`docker compose down\`.
+Optionally remove associated volumes.`,
+  {
+    remove_volumes: z
+      .boolean()
+      .optional()
+      .describe('Also remove named volumes declared in the compose file.'),
+  },
+  async (args: { remove_volumes?: boolean }) => {
+    return composeRequest('down', {
+      ...(args.remove_volumes !== undefined && { removeVolumes: args.remove_volumes }),
+    });
+  },
+);
+
+server.tool(
+  'compose_build',
+  `Build Docker Compose service images. Runs \`docker compose build\`.
+The compose file is validated for security before execution.`,
+  {
+    services: z
+      .array(z.string())
+      .optional()
+      .describe('Specific services to build. Omit to build all services.'),
+  },
+  async (args: { services?: string[] }) => {
+    return composeRequest('build', {
+      ...(args.services?.length && { services: args.services }),
+    });
+  },
+);
+
+server.tool(
+  'compose_logs',
+  `View logs from Docker Compose services. Returns the last N lines of log output.`,
+  {
+    service: z
+      .string()
+      .optional()
+      .describe('Specific service to get logs for. Omit for all services.'),
+    lines: z
+      .number()
+      .int()
+      .positive()
+      .optional()
+      .describe('Number of log lines to return (default: 100).'),
+  },
+  async (args: { service?: string; lines?: number }) => {
+    return composeRequest('logs', {
+      ...(args.service && { services: [args.service] }),
+      ...(args.lines && { lines: args.lines }),
+    });
+  },
+);
+
+server.tool(
+  'compose_ps',
+  `List the status of Docker Compose services. Shows running/stopped state, ports, etc.`,
+  {},
+  async () => {
+    return composeRequest('ps');
+  },
+);
+
+server.tool(
+  'compose_restart',
+  `Restart Docker Compose services. The compose file is validated for security before execution.`,
+  {
+    services: z
+      .array(z.string())
+      .optional()
+      .describe('Specific services to restart. Omit to restart all services.'),
+  },
+  async (args: { services?: string[] }) => {
+    return composeRequest('restart', {
+      ...(args.services?.length && { services: args.services }),
+    });
   },
 );
 
