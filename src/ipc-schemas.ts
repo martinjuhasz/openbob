@@ -98,6 +98,18 @@ export const switchSessionSchema = z.object({
   sessionId: z.string().optional(),
 });
 
+export const publishSkillSchema = z.object({
+  type: z.literal('publish_skill'),
+  requestId: z.string(),
+  name: z.string(),
+  files: z.array(
+    z.object({
+      path: z.string(),
+      content: z.string(),
+    }),
+  ),
+});
+
 export const composeSchema = z.object({
   type: z.literal('compose'),
   action: z.enum(['up', 'down', 'build', 'logs', 'ps', 'restart']),
@@ -121,6 +133,7 @@ export const taskIpcSchema = z.discriminatedUnion('type', [
   resetSessionSchema,
   listSessionsSchema,
   switchSessionSchema,
+  publishSkillSchema,
   composeSchema,
 ]);
 

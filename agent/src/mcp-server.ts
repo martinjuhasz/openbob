@@ -1110,6 +1110,130 @@ server.tool(
 );
 
 server.tool(
+  'publish_skill',
+  `Publish a skill globally so it becomes available to all groups. Main group only.
+This writes skill files (SKILL.md and optional resources) to the shared /workspace/skills/ directory.
+The skill becomes available after the next session reset (/new) in each group.
+
+For group-local skills, write files directly to /workspace/data/project/.agents/skills/<name>/ instead — no need for this tool.`,
+  {
+    name: z
+      .string()
+      .regex(/^[a-z0-9][a-z0-9._-]{0,63}$/)
+      .describe(
+        'Skill folder name (lowercase slug, e.g. "my-skill"). Must start with letter or digit.',
+      ),
+    files: z
+      .array(
+        z.object({
+          path: z
+            .string()
+            .describe(
+              'Relative file path within the skill folder, e.g. "SKILL.md" or "references/guide.md"',
+            ),
+          content: z.string().describe('File content as UTF-8 text'),
+        }),
+      )
+      .min(1)
+      .describe('Files to write. Must include at least SKILL.md.'),
+  },
+  async (args: {
+    name: string;
+    files: Array<{ path: string; content: string }>;
+  }) => {
+    const ctx = readContext();
+    if (!ctx.isMain) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: 'Only the main group can publish global skills.',
+          },
+        ],
+        isError: true,
+      };
+    }
+
+    // Validate that SKILL.md is included
+    const hasSkillMd = args.files.some(
+      (f) => f.path === 'SKILL.md' || f.path === './SKILL.md',
+    );
+    if (!hasSkillMd) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: 'Files must include SKILL.md.',
+          },
+        ],
+        isError: true,
+      };
+    }
+
+    // Validate no path traversal
+    for (const file of args.files) {
+      if (file.path.includes('..') || file.path.startsWith('/')) {
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: `Invalid file path: "${file.path}". Must be relative without "..".`,
+            },
+          ],
+          isError: true,
+        };
+      }
+    }
+
+    const requestId = generateRequestId();
+    writeIpcFile(TASKS_DIR, {
+      type: 'publish_skill',
+      requestId,
+      name: args.name,
+      files: args.files,
+      groupFolder: ctx.groupFolder,
+      timestamp: new Date().toISOString(),
+    });
+
+    const data = await pollIpcResponse<{
+      success: boolean;
+      error?: string;
+    }>(requestId);
+
+    if (!data) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: 'Timeout waiting for publish_skill response from host.',
+          },
+        ],
+        isError: true,
+      };
+    }
+    if (data.success) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: `Skill "${args.name}" published globally. It will be available to all groups after their next session reset (/new).`,
+          },
+        ],
+      };
+    }
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: `Failed to publish skill: ${data.error ?? 'unknown error'}`,
+        },
+      ],
+      isError: true,
+    };
+  },
+);
+
+server.tool(
   'transcribe_media',
   `Transcribe audio/video content to text. Supports:
 - YouTube URLs (uses captions if available, falls back to auto-subs, then speech-to-text)

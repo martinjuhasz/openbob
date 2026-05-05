@@ -11,6 +11,7 @@ import {
   GROUPS_DIR,
   isValidGroupFolder,
   POLL_INTERVAL,
+  SKILLS_DIR,
 } from './config.js';
 import {
   deleteRegisteredGroup,
@@ -910,6 +911,74 @@ export async function processTaskIpc(
         { sourceGroup, action: data.action, success: result.success },
         'Compose action via IPC',
       );
+      break;
+    }
+
+    case 'publish_skill': {
+      if (!isMain) {
+        writeIpcResponse(sourceGroup, data.requestId, {
+          success: false,
+          error: 'Only the main group can publish global skills.',
+        });
+        logger.warn(
+          { sourceGroup },
+          'publish_skill: only main group is allowed',
+        );
+        break;
+      }
+
+      const skillDir = path.resolve(SKILLS_DIR, data.name);
+      // Prevent path traversal
+      if (!skillDir.startsWith(path.resolve(SKILLS_DIR) + path.sep)) {
+        writeIpcResponse(sourceGroup, data.requestId, {
+          success: false,
+          error: 'Invalid skill name.',
+        });
+        break;
+      }
+
+      try {
+        for (const file of data.files) {
+          // Validate no traversal in file paths
+          const filePath = path.resolve(skillDir, file.path);
+          if (
+            !filePath.startsWith(skillDir + path.sep) &&
+            filePath !== skillDir
+          ) {
+            writeIpcResponse(sourceGroup, data.requestId, {
+              success: false,
+              error: `Invalid file path: "${file.path}"`,
+            });
+            logger.warn(
+              { sourceGroup, filePath: file.path },
+              'publish_skill: path traversal in file path',
+            );
+            return;
+          }
+          const fileDir = path.dirname(filePath);
+          fs.mkdirSync(fileDir, { recursive: true });
+          fs.writeFileSync(filePath, file.content, 'utf-8');
+        }
+        writeIpcResponse(sourceGroup, data.requestId, { success: true });
+        logger.info(
+          { sourceGroup, skillName: data.name, fileCount: data.files.length },
+          'Skill published globally via IPC',
+        );
+        // eslint-disable-next-line no-catch-all/no-catch-all -- return error to agent
+      } catch (err) {
+        const message =
+          err instanceof Error
+            ? err.message
+            : 'Unknown error writing skill files';
+        writeIpcResponse(sourceGroup, data.requestId, {
+          success: false,
+          error: message,
+        });
+        logger.error(
+          { sourceGroup, skillName: data.name, err },
+          'publish_skill: failed to write files',
+        );
+      }
       break;
     }
 

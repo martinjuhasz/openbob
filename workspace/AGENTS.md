@@ -86,6 +86,15 @@ You have built-in tools for all actions. Use them directly — do not write IPC 
 
 - `session_id`: the session ID to switch to (from `list_sessions`)
 
+### Skill Management
+
+**publish_skill** — Publish a skill globally so it becomes available to all groups. Main group only.
+
+- `name`: skill folder name (lowercase slug, e.g. `"my-skill"`)
+- `files`: array of `{path, content}` — relative file paths and their content. Must include `SKILL.md`.
+- The skill becomes available after the next session reset (`/new`) in each group.
+- For group-local skills, write files directly to `/workspace/data/project/.agents/skills/<name>/` instead.
+
 ### Group Management (main group only)
 
 **list_groups** — List all registered groups. Main group sees all; others see only their own.
@@ -126,6 +135,14 @@ agent-browser fill @e2 "text"   # Fill a form field
 agent-browser screenshot        # Take a screenshot
 agent-browser close             # Close the browser
 ```
+
+### install-skills — Install community skills
+
+Search and install community skills from skills.sh. For creating custom skills, see `skill-creator`.
+
+### skill-creator — Create custom skills
+
+Create new skills or modify existing ones. Supports group-local skills (any group) and global skills (admin only via `publish_skill`). Read `/workspace/skills/skill-creator/SKILL.md` for the full guide.
 
 ### status — System status report
 
