@@ -43,7 +43,7 @@ RUN npm install -g opencode-ai @playwright/cli
 WORKDIR /app
 
 COPY package*.json ./
-RUN npm ci
+RUN npm install
 
 COPY src/ ./src/
 COPY tsconfig.json ./
