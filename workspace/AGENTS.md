@@ -125,16 +125,18 @@ You have built-in tools for all actions. Use them directly — do not write IPC 
 
 Read `/workspace/skills/<name>/SKILL.md` for full documentation on each skill.
 
-### agent-browser — Browse the web
+### playwright-browser — Browse the web
 
 ```bash
-agent-browser open <url>        # Navigate to a page
-agent-browser snapshot -i       # List interactive elements
-agent-browser click @e1         # Click an element
-agent-browser fill @e2 "text"   # Fill a form field
-agent-browser screenshot        # Take a screenshot
-agent-browser close             # Close the browser
+playwright-cli -s=<name> open <url> --persistent --profile=/workspace/data/project/.browser-profiles/<name>
+playwright-cli -s=<name> snapshot -i       # List interactive elements
+playwright-cli -s=<name> click @e1         # Click an element
+playwright-cli -s=<name> fill @e2 "text"   # Fill a form field
+playwright-cli -s=<name> screenshot        # Take a screenshot
+playwright-cli -s=<name> close             # Close the browser
 ```
+
+Use `vnc_browser_session_start` / `vnc_browser_session_stop` MCP tools to let the user log in manually via noVNC before using a profile headless.
 
 ### install-skills — Install community skills
 

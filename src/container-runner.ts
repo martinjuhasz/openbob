@@ -322,6 +322,10 @@ const spawnInProgress = new Map<string, Promise<string>>();
 const lastActivity = new Map<string, number>();
 // Abort controllers for running agent sessions: folder → AbortController
 const sessionAbortControllers = new Map<string, AbortController>();
+// Track VNC port assignments per group: folder → host port
+const vncPorts = new Map<string, number>();
+// Counter for assigning VNC ports
+let vncPortCounter = 0;
 
 /** Update the last-activity timestamp for a group's container. */
 function touchContainer(groupFolder: string): void {
@@ -527,6 +531,14 @@ async function spawnContainer(
 
   // No port publish needed — host connects via Docker network using container name
   // Note: no --rm so we can fetch logs on crash; containers are cleaned up in spawnContainer
+  const vncBasePort = getEnv().VNC_BASE_PORT;
+  const vncPassword = getEnv().VNC_PASSWORD;
+  let vncHostPort: number | undefined;
+  if (vncBasePort) {
+    vncHostPort = vncBasePort + vncPortCounter++;
+    vncPorts.set(groupFolder, vncHostPort);
+  }
+
   const cmd = [
     DOCKER,
     'run',
@@ -535,11 +547,19 @@ async function spawnContainer(
     name,
     '--network',
     DOCKER_NETWORK,
+    // VNC port mapping (only if VNC_BASE_PORT is configured)
+    ...(vncHostPort ? ['-p', `${vncHostPort}:6080`] : []),
     // Environment
     '-e',
     `OPENCODE_PORT=${OPENCODE_PORT}`,
     '-e',
     `GROUP_FOLDER=${groupFolder}`,
+    // VNC environment
+    ...(vncHostPort ? ['-e', `VNC_EXTERNAL_PORT=${vncHostPort}`] : []),
+    ...(vncPassword ? ['-e', `VNC_PASSWORD=${vncPassword}`] : []),
+    ...(process.env['VNC_HOST_ADDRESS']
+      ? ['-e', `VNC_HOST_ADDRESS=${process.env['VNC_HOST_ADDRESS']}`]
+      : []),
     // Enable built-in websearch tool (Exa AI — no API key required)
     '-e',
     'OPENCODE_ENABLE_EXA=1',

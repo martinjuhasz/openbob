@@ -55,6 +55,11 @@ const envSchema = z.object({
   LOG_LEVEL: z
     .enum(['trace', 'debug', 'info', 'warn', 'error'])
     .default('info'),
+
+  // VNC Browser Session support
+  VNC_BASE_PORT: z.coerce.number().positive().optional(),
+  VNC_PASSWORD: z.preprocess(emptyToUndefined, z.string().optional()),
+  VNC_HOST_ADDRESS: z.preprocess(emptyToUndefined, z.string().optional()),
 });
 
 export type Env = z.infer<typeof envSchema>;

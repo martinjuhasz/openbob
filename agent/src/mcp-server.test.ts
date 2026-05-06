@@ -55,6 +55,19 @@ vi.mock('./transcription.js', () => ({
   transcribeMedia: mockTranscribeMedia,
 }));
 
+// ── Mock vnc-browser-session ──────────────────────────────────────────
+
+const mockStartVncBrowserSession = vi.fn();
+const mockStopVncBrowserSession = vi.fn();
+const mockGetActiveVncSessionName = vi.fn();
+const mockListBrowserProfiles = vi.fn();
+vi.mock('./vnc-browser-session.js', () => ({
+  startVncBrowserSession: mockStartVncBrowserSession,
+  stopVncBrowserSession: mockStopVncBrowserSession,
+  getActiveVncSessionName: mockGetActiveVncSessionName,
+  listBrowserProfiles: mockListBrowserProfiles,
+}));
+
 // ── Mock cron-parser ──────────────────────────────────────────────────
 
 const mockCronParse = vi.fn();
@@ -1112,5 +1125,113 @@ describe('generateRequestId (via tools)', () => {
     expect(requestIds.length).toBe(2);
     expect(requestIds[0]).not.toBe(requestIds[1]);
     expect(requestIds[0]).toMatch(/^req-\d+-[a-z0-9]+$/);
+  });
+});
+
+// ── VNC Browser Session tools ─────────────────────────────────────────
+
+describe('vnc_browser_session_start', () => {
+  beforeEach(() => {
+    setContext({});
+    mockStartVncBrowserSession.mockReset();
+  });
+
+  it('starts a VNC session and returns the URL', async () => {
+    mockStartVncBrowserSession.mockResolvedValue({
+      port: 6080,
+      url: 'http://192.168.1.100:7000/vnc.html',
+    });
+
+    const result = await getTool('vnc_browser_session_start').handler({
+      name: 'kleinanzeigen',
+      url: 'https://kleinanzeigen.de',
+    });
+
+    expect(mockStartVncBrowserSession).toHaveBeenCalledWith(
+      'kleinanzeigen',
+      'https://kleinanzeigen.de',
+    );
+    expect(result.content[0].text).toContain('VNC browser session');
+    expect(result.content[0].text).toContain(
+      'http://192.168.1.100:7000/vnc.html',
+    );
+    expect(result.isError).toBeUndefined();
+  });
+
+  it('returns error when a session is already active', async () => {
+    mockStartVncBrowserSession.mockRejectedValue(
+      new Error(
+        'A VNC browser session is already active: "amazon". Stop it first with vnc_browser_session_stop.',
+      ),
+    );
+
+    const result = await getTool('vnc_browser_session_start').handler({
+      name: 'kleinanzeigen',
+    });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('already active');
+  });
+});
+
+describe('vnc_browser_session_stop', () => {
+  beforeEach(() => {
+    setContext({});
+    mockStopVncBrowserSession.mockReset();
+  });
+
+  it('stops a VNC session and confirms profile saved', async () => {
+    mockStopVncBrowserSession.mockResolvedValue(undefined);
+
+    const result = await getTool('vnc_browser_session_stop').handler({
+      name: 'kleinanzeigen',
+    });
+
+    expect(mockStopVncBrowserSession).toHaveBeenCalledWith('kleinanzeigen');
+    expect(result.content[0].text).toContain('stopped');
+    expect(result.content[0].text).toContain('Profile saved');
+    expect(result.isError).toBeUndefined();
+  });
+
+  it('returns error when no session is active', async () => {
+    mockStopVncBrowserSession.mockRejectedValue(
+      new Error('No active VNC browser session.'),
+    );
+
+    const result = await getTool('vnc_browser_session_stop').handler({
+      name: 'kleinanzeigen',
+    });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('No active VNC browser session');
+  });
+});
+
+describe('vnc_browser_session_status', () => {
+  beforeEach(() => {
+    mockGetActiveVncSessionName.mockReset();
+    mockListBrowserProfiles.mockReset();
+  });
+
+  it('shows no active session and no profiles', async () => {
+    mockGetActiveVncSessionName.mockReturnValue(null);
+    mockListBrowserProfiles.mockReturnValue([]);
+
+    const result = await getTool('vnc_browser_session_status').handler({});
+
+    expect(result.content[0].text).toContain('No active VNC session');
+    expect(result.content[0].text).toContain('No saved browser profiles');
+  });
+
+  it('shows active session and saved profiles', async () => {
+    mockGetActiveVncSessionName.mockReturnValue('kleinanzeigen');
+    mockListBrowserProfiles.mockReturnValue(['kleinanzeigen', 'amazon']);
+
+    const result = await getTool('vnc_browser_session_status').handler({});
+
+    expect(result.content[0].text).toContain(
+      'Active VNC session: kleinanzeigen',
+    );
+    expect(result.content[0].text).toContain('kleinanzeigen, amazon');
   });
 });

@@ -4,7 +4,9 @@
 
 # openbob
 
-**An isolated agent runner for messaging platforms.** Inspired by [NanoClaw](https://github.com/qwibitai/nanoclaw) — each chat group gets its own sandboxed AI agent in a dedicated Docker container, with [OpenCode](https://opencode.ai) as the agent runtime and [OpenViking](https://github.com/volcengine/OpenViking) as persistent context memory.
+**An opinionated, isolated agent runner for developers.** Built for personal use — one developer, multiple AI agents, each sandboxed in its own Docker container. Inspired by [NanoClaw](https://github.com/qwibitai/nanoclaw), powered by [OpenCode](https://opencode.ai) as the agent runtime and [OpenViking](https://github.com/volcengine/OpenViking) as persistent context memory.
+
+openbob is opinionated: it assumes you're a developer who wants full control over your agents, their tools, and their isolation — without the overhead of a multi-tenant SaaS platform. It's designed to be forked, read, and modified.
 
 **~5,000 lines of TypeScript. That's the entire thing.** No framework maze, no abstraction layers — just a single Node.js process orchestrating Docker containers. Read it in an afternoon, fork it, make it yours.
 
@@ -80,10 +82,11 @@ The host manages all OpenViking communication — the agent itself doesn't need 
 - **Isolated group context** — Each group gets its own Docker container, workspace, `opencode.json` config, and session history.
 - **Main channel** — A privileged admin channel that can register new groups and manage the system.
 - **Scheduled tasks** — Cron, interval, or one-shot tasks that spin up the agent and can message results back.
-- **Web access** — Agents have Chromium and `agent-browser` CLI for browsing, screenshots, and web interaction.
+- **Web access** — Agents have Chromium and `@playwright/cli` for headless browsing, screenshots, and web interaction with persistent browser profiles.
+- **VNC Browser Sessions** — Start a noVNC session to manually log into websites. The authenticated browser profile is then reusable by the agent headlessly — no credentials shared with the system.
 - **Per-group model override** — Different groups can use different LLM models.
 - **MCP tools** — Agents have access to custom tools (send messages, schedule tasks, manage groups) via the Model Context Protocol.
-- **Skills** — Read-only skill packs mounted into containers (e.g., `agent-browser`, `status`).
+- **Skills** — Read-only skill packs mounted into containers (e.g., `playwright-browser`, `status`).
 - **Voice transcription** (optional) — Transcribes voice messages to text using NVIDIA Parakeet TDT. CPU-only, no GPU required.
 - **OpenViking memory** (optional) — Semantic recall and storage across sessions. Agents build up knowledge over time.
 
@@ -341,6 +344,9 @@ All containers share the `openbob` Docker network. The host reaches agent contai
 | `OPENVIKING_URL`        | No        | OpenViking API URL (default: `http://openviking:1933`)            |
 | `OPENVIKING_API_KEY`    | No        | OpenViking root API key — required for `group` scope provisioning |
 | `OPENVIKING_SCOPE`      | No        | `global` or `group` (default: `global`) — see below               |
+| `VNC_BASE_PORT`         | No        | Base port for noVNC access (e.g. `7000`). Each group gets +1. Required for VNC browser sessions. |
+| `VNC_PASSWORD`          | No        | Password for noVNC sessions. If unset, no auth required.          |
+| `VNC_HOST_ADDRESS`      | No        | IP/hostname the agent reports in the noVNC URL (default: `localhost`) |
 
 > **Note:** LLM provider API keys are **not** configured via environment variables. Authentication is handled entirely through `auth.json` — see [Authentication](#authentication).
 
@@ -393,6 +399,30 @@ On first startup, the ~600MB ONNX model is downloaded from HuggingFace and cache
 | ----------- | --------------------------- | ---------------------- |
 | `STT_MODEL` | `nemo-parakeet-tdt-0.6b-v3` | Parakeet model variant |
 
+### VNC Browser Sessions
+
+openbob supports persistent, authenticated browser sessions without ever sharing credentials with the system. The workflow:
+
+1. **Tell the agent** to start a VNC browser session (e.g. "Starte eine Browser-Session für kleinanzeigen")
+2. **The agent** calls `vnc_browser_session_start` → starts Xvfb + noVNC + Chromium inside the container
+3. **You get a URL** (e.g. `http://192.168.1.x:7000/vnc.html`) — open it, log in manually
+4. **Tell the agent** you're done → it calls `vnc_browser_session_stop`, browser closes, profile is saved
+5. **From now on**, the agent uses the saved profile headlessly via `playwright-cli` — fully authenticated, no credentials in env vars
+
+**Setup:**
+
+```bash
+# Add to .env
+VNC_BASE_PORT=7000                  # Required to enable VNC
+VNC_PASSWORD=optional-password      # Optional — protects the noVNC session
+VNC_HOST_ADDRESS=192.168.1.100      # Optional — your LAN IP (for the URL the agent returns)
+```
+
+**Constraints:**
+- One active VNC session per group (multiple saved profiles are fine)
+- VNC and headless access can't use the same profile simultaneously
+- Profiles are stored under `.browser-profiles/<name>/` in the group's workspace volume
+
 ## MCP Servers
 
 Agents get MCP tools from two sources:
@@ -443,10 +473,10 @@ Skills are read-only instruction packs mounted at `/workspace/skills` inside age
 
 Built-in skills:
 
-| Skill           | Description                                         |
-| --------------- | --------------------------------------------------- |
-| `agent-browser` | Web browsing via Chromium and `agent-browser` CLI   |
-| `status`        | System status reporting (containers, health, tasks) |
+| Skill               | Description                                                              |
+| ------------------- | ------------------------------------------------------------------------ |
+| `playwright-browser` | Web browsing via `@playwright/cli` with persistent profiles + VNC login |
+| `status`            | System status reporting (containers, health, tasks)                      |
 
 ## Development
 

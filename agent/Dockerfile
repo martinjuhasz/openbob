@@ -2,7 +2,7 @@
 # Runs OpenCode SDK in isolated container, one per active session
 FROM node:22-slim
 
-# System dependencies for Chromium (agent-browser) and media tools
+# System dependencies for Chromium (playwright-cli) and media tools
 RUN apt-get update && apt-get install -y \
     chromium \
     ffmpeg \
@@ -22,6 +22,11 @@ RUN apt-get update && apt-get install -y \
     libcups2 \
     libdrm2 \
     libxshmfence1 \
+    # VNC browser session support
+    xvfb \
+    x11vnc \
+    novnc \
+    websockify \
     curl \
     git \
     && rm -rf /var/lib/apt/lists/*
@@ -30,11 +35,10 @@ RUN apt-get update && apt-get install -y \
 RUN curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp \
     -o /usr/local/bin/yt-dlp && chmod a+rx /usr/local/bin/yt-dlp
 
-ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium
 ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
 
-# Install opencode CLI and agent-browser globally
-RUN npm install -g opencode-ai agent-browser
+# Install opencode CLI and playwright-cli globally
+RUN npm install -g opencode-ai @playwright/cli
 
 WORKDIR /app
 
