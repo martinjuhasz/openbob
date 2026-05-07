@@ -10,6 +10,7 @@ agent/dist/
 workspace/groups/
 openviking-data/
 models/
+data/
 
 # Secrets
 .env

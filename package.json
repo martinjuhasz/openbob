@@ -7,7 +7,7 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
-    "dev": "tsx src/index.ts",
+    "dev": "node --env-file=.env --import=tsx src/index.ts",
     "typecheck": "tsc --noEmit && tsc --noEmit -p agent/tsconfig.json",
     "format": "prettier --write \"src/**/*.ts\" \"agent/src/**/*.ts\"",
     "format:check": "prettier --check \"src/**/*.ts\" \"agent/src/**/*.ts\"",

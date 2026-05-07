@@ -312,6 +312,45 @@ const OPENCODE_PORT = 4096;
 const SERVER_POLL_INTERVAL = 500; // 0.5s
 const RESPONSE_POLL_INTERVAL = 1_000; // 1s
 
+/**
+ * Detect whether the host process is running outside Docker.
+ * When true, agent containers must expose ports and be reached via localhost.
+ */
+function isHostLocal(): boolean {
+  // Inside Docker the host container is named openbob-host (set by compose).
+  // If HOSTNAME is missing or docker inspect fails we're likely running locally.
+  // Also check /.dockerenv which exists inside Docker containers.
+  try {
+    fs.accessSync('/.dockerenv');
+    return false;
+  } catch {
+    return true;
+  }
+}
+
+const HOST_LOCAL = isHostLocal();
+
+// Next available host port for mapping agent OpenCode ports when running locally.
+let nextAgentPort = 14096;
+
+// Map group folder → assigned localhost port (only used when HOST_LOCAL)
+const agentHostPorts = new Map<string, number>();
+
+/**
+ * Get the base URL to reach an agent container's OpenCode server.
+ * When running inside Docker, uses the container hostname on the Docker network.
+ * When running locally, uses localhost with the mapped port.
+ */
+function agentBaseUrl(groupFolder: string, containerNameVal: string): string {
+  if (HOST_LOCAL) {
+    const port = agentHostPorts.get(groupFolder);
+    if (!port)
+      throw new Error(`No host port assigned for group ${groupFolder}`);
+    return `http://localhost:${port}`;
+  }
+  return `http://${containerNameVal}:${OPENCODE_PORT}`;
+}
+
 // Track running containers per group: folder → name
 const activeContainers = new Map<string, string>();
 // Track model per container for restart-on-change: folder → model
@@ -539,6 +578,13 @@ async function spawnContainer(
     vncPorts.set(groupFolder, vncHostPort);
   }
 
+  // When host runs locally (outside Docker), publish the OpenCode port to localhost
+  let agentPort: number | undefined;
+  if (HOST_LOCAL) {
+    agentPort = nextAgentPort++;
+    agentHostPorts.set(groupFolder, agentPort);
+  }
+
   const cmd = [
     DOCKER,
     'run',
@@ -547,6 +593,8 @@ async function spawnContainer(
     name,
     '--network',
     DOCKER_NETWORK,
+    // OpenCode port mapping (only when host runs outside Docker)
+    ...(agentPort ? ['-p', `${agentPort}:${OPENCODE_PORT}`] : []),
     // VNC port mapping (only if VNC_BASE_PORT is configured)
     ...(vncHostPort ? ['-p', `${vncHostPort}:6080`] : []),
     // Environment
@@ -605,10 +653,13 @@ async function spawnContainer(
 }
 
 /**
- * Wait for OpenCode server health check to pass (via Docker network hostname).
+ * Wait for OpenCode server health check to pass.
  */
-async function waitForServer(containerName: string): Promise<void> {
-  const baseUrl = `http://${containerName}:${OPENCODE_PORT}`;
+async function waitForServer(
+  groupFolder: string,
+  containerNameVal: string,
+): Promise<void> {
+  const baseUrl = agentBaseUrl(groupFolder, containerNameVal);
   const startupTimeout = getEnv().AGENT_STARTUP_TIMEOUT ?? 30_000;
   const deadline = Date.now() + startupTimeout;
   let attempts = 0;
@@ -627,7 +678,7 @@ async function waitForServer(containerName: string): Promise<void> {
     }
     if (attempts <= 3 || attempts % 10 === 0) {
       logger.debug(
-        { containerName, attempts, lastError },
+        { containerName: containerNameVal, attempts, lastError },
         'waitForServer poll attempt',
       );
     }
@@ -638,11 +689,11 @@ async function waitForServer(containerName: string): Promise<void> {
     'logs',
     '--tail',
     '50',
-    containerName,
+    containerNameVal,
   ]).catch(() => ({ stdout: '(could not fetch logs)', stderr: '' }));
   const containerLogs = stdout + stderr;
   logger.error(
-    { containerName, containerLogs, lastError, attempts },
+    { containerName: containerNameVal, containerLogs, lastError, attempts },
     'Agent container logs on timeout',
   );
   throw new Error(
@@ -704,6 +755,7 @@ async function getAgentContainer(
       );
       await execFileAsync(DOCKER, ['rm', '-f', existing]).catch(() => {});
       activeContainers.delete(groupFolder);
+      agentHostPorts.delete(groupFolder);
       containerModels.delete(groupFolder);
     } else {
       // Verify container still running
@@ -713,6 +765,7 @@ async function getAgentContainer(
         // eslint-disable-next-line no-catch-all/no-catch-all -- container gone, clean up and re-spawn
       } catch {
         activeContainers.delete(groupFolder);
+        agentHostPorts.delete(groupFolder);
         containerModels.delete(groupFolder);
       }
     }
@@ -724,7 +777,7 @@ async function getAgentContainer(
 
   const p = (async () => {
     const name = await spawnContainer(groupFolder, model);
-    await waitForServer(name);
+    await waitForServer(groupFolder, name);
     return name;
   })().finally(() => spawnInProgress.delete(groupFolder));
 
@@ -740,6 +793,7 @@ export async function stopGroupContainer(groupFolder: string): Promise<void> {
   if (!name) return;
   await execFileAsync(DOCKER, ['rm', '-f', name]).catch(() => {});
   activeContainers.delete(groupFolder);
+  agentHostPorts.delete(groupFolder);
   containerModels.delete(groupFolder);
   lastActivity.delete(groupFolder);
   logger.info({ groupFolder }, 'Agent container stopped and removed');
@@ -771,7 +825,7 @@ export async function listAgentSessions(
   const name = activeContainers.get(groupFolder);
   if (!name) return [];
   const client = createOpencodeClient({
-    baseUrl: `http://${name}:${OPENCODE_PORT}`,
+    baseUrl: agentBaseUrl(groupFolder, name),
   });
   const res = await client.session.list();
   return (res.data ?? []).map(
@@ -793,7 +847,7 @@ export async function validateAgentSession(
   const name = activeContainers.get(groupFolder);
   if (!name) return false;
   const client = createOpencodeClient({
-    baseUrl: `http://${name}:${OPENCODE_PORT}`,
+    baseUrl: agentBaseUrl(groupFolder, name),
   });
   const res = await client.session.get({ path: { id: sessionId } });
   return !!res.data;
@@ -821,7 +875,7 @@ export async function runAgentSession(
   }
 
   const client = createOpencodeClient({
-    baseUrl: `http://${agentName}:${OPENCODE_PORT}`,
+    baseUrl: agentBaseUrl(groupFolder, agentName),
   });
 
   // Write context.json to group dir (mounted ro at /workspace/context.json)

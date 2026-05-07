@@ -12,6 +12,10 @@ const mockFs = vi.hoisted(() => ({
   readFileSync: vi.fn(),
   writeFileSync: vi.fn(),
   existsSync: vi.fn().mockReturnValue(false),
+  accessSync: vi.fn().mockImplementation(() => {
+    // Simulate /.dockerenv not found → isHostLocal returns true
+    throw new Error('ENOENT');
+  }),
 }));
 
 const mockClientSession = vi.hoisted(() => ({

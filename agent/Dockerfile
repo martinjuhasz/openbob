@@ -35,7 +35,7 @@ RUN apt-get update && apt-get install -y \
 RUN curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp \
     -o /usr/local/bin/yt-dlp && chmod a+rx /usr/local/bin/yt-dlp
 
-ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
+# playwright-cli config is written at container start (see ENTRYPOINT)
 
 # Install opencode CLI and playwright-cli globally
 RUN npm install -g opencode-ai @playwright/cli
@@ -68,4 +68,5 @@ USER node
 WORKDIR /workspace/data/project
 
 # Symlink ~/.local/share/opencode → /workspace/data/opencode so OpenCode finds its auth + config
-ENTRYPOINT ["sh", "-c", "ln -sfn /workspace/data/opencode /home/node/.local/share/opencode && exec node /app/dist/index.js"]
+# Write playwright-cli config to use system Chromium instead of Google Chrome
+ENTRYPOINT ["sh", "-c", "ln -sfn /workspace/data/opencode /home/node/.local/share/opencode && mkdir -p /workspace/data/project/.playwright && printf '{\"browser\":{\"launchOptions\":{\"executablePath\":\"/usr/bin/chromium\"}}}' > /workspace/data/project/.playwright/cli.config.json && exec node /app/dist/index.js"]
