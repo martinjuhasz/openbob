@@ -39,6 +39,10 @@ services:
       - OPENVIKING_API_KEY=${OPENVIKING_API_KEY:-openbob-local}
       # Optional
       - LOG_LEVEL=${LOG_LEVEL:-info}
+      # VNC browser sessions
+      - VNC_BASE_PORT=${VNC_BASE_PORT:-}
+      - VNC_PASSWORD=${VNC_PASSWORD:-}
+      - VNC_HOST_ADDRESS=${VNC_HOST_ADDRESS:-}
     networks:
       - openbob
 
