@@ -70,6 +70,23 @@ export async function startVncBrowserSession(
   const profileDir = getProfileDir(name);
   fs.mkdirSync(profileDir, { recursive: true });
 
+  // Clean up stale X lock file from previous crash/restart
+  const lockFile = '/tmp/.X99-lock';
+  try {
+    fs.unlinkSync(lockFile);
+  } catch {
+    // File doesn't exist — expected
+  }
+
+  // Clean up stale Chromium singleton locks from previous headless sessions
+  for (const lockName of ['SingletonLock', 'SingletonSocket', 'SingletonCookie']) {
+    try {
+      fs.unlinkSync(path.join(profileDir, lockName));
+    } catch {
+      // File doesn't exist — expected
+    }
+  }
+
   // 1. Start Xvfb
   const xvfbProc = spawnProcess('Xvfb', [
     DISPLAY,
@@ -147,7 +164,7 @@ export async function startVncBrowserSession(
 
   return {
     port: VNC_PORT,
-    url: `http://${hostIp}:${externalPort}/vnc.html`,
+    url: `http://${hostIp}:${externalPort}/vnc.html?autoconnect=true`,
   };
 }
 
@@ -170,15 +187,17 @@ export async function stopVncBrowserSession(name: string): Promise<void> {
     }
   };
 
+  // SIGTERM Chromium first and give it time for a clean shutdown (removes locks itself)
   killProc(activeSession.chromiumProc);
+  await new Promise((r) => setTimeout(r, 3000));
+
+  // Now stop the rest of the stack
   killProc(activeSession.websockifyProc);
   killProc(activeSession.vncProc);
   killProc(activeSession.xvfbProc);
-
-  // Give processes time to exit
   await new Promise((r) => setTimeout(r, 500));
 
-  // Force kill if still alive
+  // Force kill anything still alive
   for (const proc of [
     activeSession.chromiumProc,
     activeSession.websockifyProc,
@@ -197,6 +216,16 @@ export async function stopVncBrowserSession(name: string): Promise<void> {
     await execFileAsync('rm', ['-f', '/tmp/.X99-lock']);
   } catch {
     // Ignore
+  }
+
+  // Clean up Chromium singleton locks so headless playwright-cli can use the profile
+  const profileDir = getProfileDir(name);
+  for (const lockName of ['SingletonLock', 'SingletonSocket', 'SingletonCookie']) {
+    try {
+      fs.unlinkSync(path.join(profileDir, lockName));
+    } catch {
+      // File doesn't exist — expected
+    }
   }
 
   activeSession = null;

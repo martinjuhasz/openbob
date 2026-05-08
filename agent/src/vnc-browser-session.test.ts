@@ -72,7 +72,7 @@ describe('vnc-browser-session – validation', () => {
     process.env['VNC_EXTERNAL_PORT'] = '7042';
 
     const result = await mod.startVncBrowserSession('envtest');
-    expect(result.url).toBe('http://10.0.0.5:7042/vnc.html');
+    expect(result.url).toBe('http://10.0.0.5:7042/vnc.html?autoconnect=true');
 
     delete process.env['VNC_HOST_ADDRESS'];
     delete process.env['VNC_EXTERNAL_PORT'];
@@ -83,7 +83,7 @@ describe('vnc-browser-session – validation', () => {
     delete process.env['VNC_EXTERNAL_PORT'];
 
     const result = await mod.startVncBrowserSession('defaults');
-    expect(result.url).toBe('http://localhost:6080/vnc.html');
+    expect(result.url).toBe('http://localhost:6080/vnc.html?autoconnect=true');
   });
 });
 
