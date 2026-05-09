@@ -1,7 +1,13 @@
 // Shared types between host and agent container
 
-/** Commands handled by the host orchestrator (not channel-local like ping/chatid). */
-export type Command = 'new' | 'stop' | 'restart';
+/** Command types handled by the host orchestrator (not channel-local like ping/chatid). */
+export type CommandType = 'new' | 'stop' | 'restart' | 'sessions' | 'switch';
+
+/** Parsed command with optional argument (e.g. /switch <sessionId>). */
+export interface Command {
+  type: CommandType;
+  arg?: string;
+}
 
 export type OnCommand = (chatJid: string, command: Command) => void;
 

@@ -18,6 +18,7 @@ import {
   stopGroupContainer,
   runAgentSession,
   abortAgentSession,
+  listAgentSessions,
   warmUpContainers,
   startupWarmUp,
   startIdleChecker,
@@ -388,7 +389,7 @@ async function main(): Promise<void> {
       const group = registeredGroups[chatJid];
       if (!group) return;
 
-      if (command === 'new') {
+      if (command.type === 'new') {
         deleteSession(group.folder);
         const channel = findChannel(channels, chatJid);
         if (channel) {
@@ -404,7 +405,7 @@ async function main(): Promise<void> {
         logger.info({ group: group.name }, 'new: session cleared');
       }
 
-      if (command === 'stop') {
+      if (command.type === 'stop') {
         abortAgentSession(group.folder);
         const channel = findChannel(channels, chatJid);
         if (channel) {
@@ -417,7 +418,7 @@ async function main(): Promise<void> {
         logger.info({ group: group.name }, 'stop: agent session aborted');
       }
 
-      if (command === 'restart') {
+      if (command.type === 'restart') {
         abortAgentSession(group.folder);
         stopGroupContainer(group.folder).catch((err: unknown) =>
           logger.warn(
@@ -439,6 +440,52 @@ async function main(): Promise<void> {
         logger.info(
           { group: group.name },
           'restart: container stopped, will restart on next message',
+        );
+      }
+
+      if (command.type === 'sessions') {
+        const channel = findChannel(channels, chatJid);
+        if (!channel) return;
+        const activeSessionId = getSession(group.folder);
+        listAgentSessions(group.folder)
+          .then((sessions) => {
+            if (sessions.length === 0) {
+              return channel.sendMessage(chatJid, 'Keine Sessions vorhanden.');
+            }
+            const lines = sessions.map((s) => {
+              const marker = s.id === activeSessionId ? ' ✅' : '';
+              const title = s.title ?? 'Ohne Titel';
+              return `• \`${s.id}\` — ${title}${marker}`;
+            });
+            return channel.sendMessage(
+              chatJid,
+              `📋 Sessions:\n${lines.join('\n')}`,
+            );
+          })
+          .catch((err: unknown) =>
+            logger.warn({ chatJid, err }, 'Failed to list sessions'),
+          );
+        logger.info({ group: group.name }, 'sessions: listed');
+      }
+
+      if (command.type === 'switch') {
+        const sessionId = command.arg;
+        if (!sessionId) return;
+        const channel = findChannel(channels, chatJid);
+        setSession(group.folder, sessionId);
+        if (channel) {
+          channel
+            .sendMessage(chatJid, `🔀 Session gewechselt zu \`${sessionId}\`.`)
+            .catch((err: unknown) =>
+              logger.warn(
+                { chatJid, err },
+                'Failed to send switch confirmation',
+              ),
+            );
+        }
+        logger.info(
+          { group: group.name, sessionId },
+          'switch: session changed',
         );
       }
     },

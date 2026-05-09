@@ -6,16 +6,20 @@ import { Command } from './types.js';
 
 /**
  * Parse a raw message into a normalized Command, regardless of prefix.
- * Accepts both `/new` and `!new` so each channel can use its native syntax.
+ * Accepts both `/cmd` and `!cmd` so each channel can use its native syntax.
+ * Some commands accept an argument (e.g. `/switch <sessionId>`).
  * Returns null if the message is not a recognized orchestrator command.
  */
 export function parseCommand(text: string): Command | null {
   const trimmed = text.trim();
-  const match = trimmed.match(/^[/!](\w+)$/);
+  const match = trimmed.match(/^[/!](\w+)(?:\s+(.+))?$/);
   if (!match) return null;
   const cmd = match[1].toLowerCase();
-  if (cmd === 'new' || cmd === 'reset') return 'new';
-  if (cmd === 'stop') return 'stop';
-  if (cmd === 'restart') return 'restart';
+  const arg = match[2]?.trim();
+  if (cmd === 'new' || cmd === 'reset') return { type: 'new' };
+  if (cmd === 'stop') return { type: 'stop' };
+  if (cmd === 'restart') return { type: 'restart' };
+  if (cmd === 'sessions') return { type: 'sessions' };
+  if (cmd === 'switch') return arg ? { type: 'switch', arg } : null;
   return null;
 }
