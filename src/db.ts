@@ -110,6 +110,17 @@ export function initDatabase(): void {
       `ALTER TABLE registered_groups ADD COLUMN extra_mounts TEXT`,
     ).run();
   }
+  // Migration: add browser_enabled + browser_profile columns
+  if (!cols.includes('browser_enabled')) {
+    db.prepare(
+      `ALTER TABLE registered_groups ADD COLUMN browser_enabled INTEGER NOT NULL DEFAULT 0`,
+    ).run();
+  }
+  if (!cols.includes('browser_profile')) {
+    db.prepare(
+      `ALTER TABLE registered_groups ADD COLUMN browser_profile TEXT`,
+    ).run();
+  }
   logger.info({ dbPath: DB_PATH }, 'Database initialised');
 }
 
@@ -219,6 +230,8 @@ export function getAllRegisteredGroups(): Record<string, GroupConfig> {
     always_respond: number;
     model: string | null;
     extra_mounts: string | null;
+    browser_enabled: number;
+    browser_profile: string | null;
     created_at: number;
   }>;
   const result: Record<string, GroupConfig> = {};
@@ -233,6 +246,8 @@ export function getAllRegisteredGroups(): Record<string, GroupConfig> {
       alwaysRespond: row.always_respond === 1,
       model: row.model ?? undefined,
       extraMounts: parseExtraMounts(row.extra_mounts),
+      browserEnabled: row.browser_enabled === 1,
+      browserProfile: row.browser_profile,
       createdAt: row.created_at,
     };
   }
@@ -242,17 +257,19 @@ export function getAllRegisteredGroups(): Record<string, GroupConfig> {
 export function setRegisteredGroup(config: GroupConfig): void {
   db.prepare(
     `
-    INSERT INTO registered_groups (jid, name, folder, trigger, channel, is_main, always_respond, model, extra_mounts, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO registered_groups (jid, name, folder, trigger, channel, is_main, always_respond, model, extra_mounts, browser_enabled, browser_profile, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(jid) DO UPDATE SET
-      name           = excluded.name,
-      folder         = excluded.folder,
-      trigger        = excluded.trigger,
-      channel        = excluded.channel,
-      is_main        = excluded.is_main,
-      always_respond = excluded.always_respond,
-      model          = excluded.model,
-      extra_mounts   = excluded.extra_mounts
+      name            = excluded.name,
+      folder          = excluded.folder,
+      trigger         = excluded.trigger,
+      channel         = excluded.channel,
+      is_main         = excluded.is_main,
+      always_respond  = excluded.always_respond,
+      model           = excluded.model,
+      extra_mounts    = excluded.extra_mounts,
+      browser_enabled = excluded.browser_enabled,
+      browser_profile = excluded.browser_profile
   `,
   ).run(
     config.jid,
@@ -264,6 +281,8 @@ export function setRegisteredGroup(config: GroupConfig): void {
     config.alwaysRespond ? 1 : 0,
     config.model ?? null,
     serializeExtraMounts(config.extraMounts),
+    config.browserEnabled ? 1 : 0,
+    config.browserProfile ?? null,
     config.createdAt,
   );
 }
@@ -285,6 +304,15 @@ export function setOvUserKey(groupFolder: string, key: string): void {
   db.prepare(
     `UPDATE registered_groups SET ov_user_key = ? WHERE folder = ?`,
   ).run(key, groupFolder);
+}
+
+export function setBrowserProfile(
+  groupFolder: string,
+  profileId: string,
+): void {
+  db.prepare(
+    `UPDATE registered_groups SET browser_profile = ? WHERE folder = ?`,
+  ).run(profileId, groupFolder);
 }
 
 export function migrateGroupJid(oldJid: string, newJid: string): boolean {

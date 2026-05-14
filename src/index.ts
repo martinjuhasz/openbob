@@ -346,6 +346,7 @@ function registerInitialGroupFromEnv(): void {
     isMain,
     alwaysRespond:
       process.env['INITIAL_GROUP_ALWAYS_RESPOND'] === 'true' || isMain,
+    browserEnabled: false,
     createdAt: Date.now(),
   };
   setRegisteredGroup(config);

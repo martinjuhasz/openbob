@@ -472,6 +472,7 @@ describe('TelegramChannel', () => {
           channel: 'telegram',
           isMain: false,
           alwaysRespond: false,
+          browserEnabled: false,
           createdAt: Date.now(),
         },
       };
@@ -563,6 +564,7 @@ describe('TelegramChannel', () => {
           channel: 'telegram',
           isMain: false,
           alwaysRespond: false,
+          browserEnabled: false,
           createdAt: Date.now(),
         },
       };
@@ -610,6 +612,7 @@ describe('TelegramChannel', () => {
             channel: 'telegram',
             isMain: false,
             alwaysRespond: false,
+            browserEnabled: false,
             createdAt: Date.now(),
           },
         }),
@@ -665,6 +668,7 @@ describe('TelegramChannel', () => {
             channel: 'telegram',
             isMain: false,
             alwaysRespond: false,
+            browserEnabled: false,
             createdAt: Date.now(),
           },
         }),
@@ -706,6 +710,7 @@ describe('TelegramChannel', () => {
             channel: 'telegram',
             isMain: false,
             alwaysRespond: true,
+            browserEnabled: false,
             createdAt: Date.now(),
           },
         }),
@@ -767,6 +772,7 @@ describe('TelegramChannel', () => {
       channel: 'telegram',
       isMain: false,
       alwaysRespond: false,
+      browserEnabled: false,
       createdAt: Date.now(),
     };
     const groups = { 'tg:999': group };
@@ -903,6 +909,7 @@ describe('TelegramChannel', () => {
       channel: 'telegram',
       isMain: false,
       alwaysRespond: false,
+      browserEnabled: false,
       createdAt: Date.now(),
     };
     const groups = { 'tg:999': group };
@@ -1131,6 +1138,7 @@ describe('TelegramChannel', () => {
       channel: 'telegram',
       isMain: false,
       alwaysRespond: false,
+      browserEnabled: false,
       createdAt: Date.now(),
     };
     const groups = { 'tg:999': group };

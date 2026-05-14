@@ -56,10 +56,16 @@ const envSchema = z.object({
     .enum(['trace', 'debug', 'info', 'warn', 'error'])
     .default('info'),
 
-  // VNC Browser Session support
-  VNC_BASE_PORT: z.coerce.number().positive().optional(),
-  VNC_PASSWORD: z.preprocess(emptyToUndefined, z.string().optional()),
-  VNC_HOST_ADDRESS: z.preprocess(emptyToUndefined, z.string().optional()),
+  // CloakBrowser-Manager (optional — only needed if browser profiles are used)
+  CLOAKBROWSER_MANAGER_URL: z.preprocess(
+    emptyToUndefined,
+    z.string().url().optional(),
+  ),
+  CLOAKBROWSER_AUTH_TOKEN: z.preprocess(
+    emptyToUndefined,
+    z.string().optional(),
+  ),
+  CLOAKBROWSER_PORT: z.coerce.number().positive().optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;

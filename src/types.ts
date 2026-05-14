@@ -90,6 +90,10 @@ export interface GroupConfig {
   model?: string | null;
   /** Additional host directories to bind-mount into the agent container. */
   extraMounts?: ExtraMount[] | null;
+  /** Whether a CloakBrowser profile should be launched for this group. */
+  browserEnabled: boolean;
+  /** CloakBrowser-Manager profile ID. Null = not yet created. */
+  browserProfile?: string | null;
 }
 
 export interface ScheduledTask {

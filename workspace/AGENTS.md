@@ -127,16 +127,9 @@ Read `/workspace/skills/<name>/SKILL.md` for full documentation on each skill.
 
 ### playwright-browser — Browse the web
 
-```bash
-playwright-cli -s=<name> open <url> --persistent --profile=/workspace/data/project/.browser-profiles/<name>
-playwright-cli -s=<name> snapshot -i       # List interactive elements
-playwright-cli -s=<name> click @e1         # Click an element
-playwright-cli -s=<name> fill @e2 "text"   # Fill a form field
-playwright-cli -s=<name> screenshot        # Take a screenshot
-playwright-cli -s=<name> close             # Close the browser
-```
+When browser is enabled for your group, Playwright MCP tools are available (`browser_navigate`, `browser_snapshot`, `browser_click`, `browser_type`, `browser_take_screenshot`, etc.). The browser session is managed automatically by CloakBrowser-Manager — it connects on your first tool call.
 
-Use `vnc_browser_session_start` / `vnc_browser_session_stop` MCP tools to let the user log in manually via noVNC before using a profile headless.
+For manual user login, direct the user to the CloakBrowser-Manager web UI where they can interact via the built-in noVNC viewer. noVNC and your CDP connection work simultaneously.
 
 ### install-skills — Install community skills
 

@@ -15,6 +15,7 @@ import {
   getOvUserKey,
   setOvUserKey,
   getAllRegisteredGroups,
+  setBrowserProfile,
 } from './db.js';
 import { getEnv } from './env.js';
 import { logger } from './logger.js';
@@ -96,6 +97,77 @@ function buildExtraMountArgs(groupFolder: string): string[] {
 const DOCKER_NETWORK = process.env['DOCKER_NETWORK'] ?? 'openbob';
 // DATA_PATH: absolute path on the Docker host (same value used in compose bind mount)
 const DATA_PATH_HOST = process.env['DATA_PATH'] ?? DATA_DIR;
+
+// --- CloakBrowser-Manager helpers ---
+
+interface CloakBrowserProfile {
+  id: string;
+  name: string;
+  status?: string;
+}
+
+/** Build headers for CloakBrowser-Manager API requests. */
+function cloakHeaders(): Record<string, string> {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
+  const token = getEnv().CLOAKBROWSER_AUTH_TOKEN;
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  return headers;
+}
+
+/** Create a new browser profile in the CloakBrowser-Manager. Returns the profile ID. */
+async function createBrowserProfile(name: string): Promise<string> {
+  const url = getEnv().CLOAKBROWSER_MANAGER_URL;
+  if (!url) throw new Error('CLOAKBROWSER_MANAGER_URL is not configured');
+  const res = await fetch(`${url}/api/profiles`, {
+    method: 'POST',
+    headers: cloakHeaders(),
+    body: JSON.stringify({ name }),
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error(
+      `Failed to create browser profile: ${res.status} ${body.slice(0, 500)}`,
+    );
+  }
+  const data = (await res.json()) as CloakBrowserProfile;
+  return data.id;
+}
+
+/** Launch (start) a browser profile in the CloakBrowser-Manager. */
+async function launchBrowserProfile(profileId: string): Promise<void> {
+  const url = getEnv().CLOAKBROWSER_MANAGER_URL;
+  if (!url) return;
+  const res = await fetch(`${url}/api/profiles/${profileId}/launch`, {
+    method: 'POST',
+    headers: cloakHeaders(),
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error(
+      `Failed to launch browser profile ${profileId}: ${res.status} ${body.slice(0, 500)}`,
+    );
+  }
+}
+
+/** Stop a browser profile in the CloakBrowser-Manager. */
+async function stopBrowserProfile(profileId: string): Promise<void> {
+  const url = getEnv().CLOAKBROWSER_MANAGER_URL;
+  if (!url) return;
+  const res = await fetch(`${url}/api/profiles/${profileId}/stop`, {
+    method: 'POST',
+    headers: cloakHeaders(),
+  });
+  // Ignore errors on stop — profile may already be stopped
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    logger.warn(
+      { profileId, status: res.status, body: body.slice(0, 200) },
+      'Failed to stop browser profile (may already be stopped)',
+    );
+  }
+}
 
 // OpenViking memory integration
 const OV_ACCOUNT = 'openbob';
@@ -361,10 +433,6 @@ const spawnInProgress = new Map<string, Promise<string>>();
 const lastActivity = new Map<string, number>();
 // Abort controllers for running agent sessions: folder → AbortController
 const sessionAbortControllers = new Map<string, AbortController>();
-// Track VNC port assignments per group: folder → host port
-const vncPorts = new Map<string, number>();
-// Counter for assigning VNC ports
-let vncPortCounter = 0;
 
 /** Update the last-activity timestamp for a group's container. */
 function touchContainer(groupFolder: string): void {
@@ -463,7 +531,11 @@ function getForwardEnvArgs(): string[] {
  */
 const BASE_CONFIG_TEMPLATE = '/workspace/opencode.json';
 
-function writeOpencodeConfig(groupFolder: string, model: string): void {
+function writeOpencodeConfig(
+  groupFolder: string,
+  model: string,
+  browserProfileId?: string | null,
+): void {
   const groupDir = path.join(GROUPS_DIR, groupFolder);
   const configPath = path.join(groupDir, 'opencode.json');
 
@@ -499,6 +571,25 @@ function writeOpencodeConfig(groupFolder: string, model: string): void {
   const existingMcp =
     (existing.mcp as Record<string, unknown> | undefined) ?? {};
   const mergedMcp = { ...existingMcp, ...templateMcp };
+
+  // Conditionally add @playwright/mcp for CloakBrowser-Manager integration
+  const managerUrl = getEnv().CLOAKBROWSER_MANAGER_URL;
+  if (browserProfileId && managerUrl) {
+    // The agent runs inside Docker and needs the Docker-network-reachable URL.
+    // When the host runs locally (outside Docker), CLOAKBROWSER_MANAGER_URL
+    // points to localhost — but the agent container must use the Docker hostname.
+    const agentManagerUrl = HOST_LOCAL
+      ? 'http://cloakbrowser-manager:8080'
+      : managerUrl;
+    const cdpUrl = `${agentManagerUrl}/api/profiles/${browserProfileId}/cdp`;
+    mergedMcp['playwright'] = {
+      command: 'npx',
+      args: ['@playwright/mcp', '--cdp-endpoint', cdpUrl],
+    };
+  } else {
+    // Remove stale playwright entry if browser was disabled
+    delete mergedMcp['playwright'];
+  }
 
   const config = { ...existing, ...template, model, mcp: mergedMcp };
 
@@ -543,8 +634,33 @@ async function spawnContainer(
     fs.chmodSync(dir, 0o777);
   }
 
+  // Ensure browser profile exists and is launched (if enabled for this group)
+  const groups = getAllRegisteredGroups();
+  const groupConfig = Object.values(groups).find(
+    (g) => g.folder === groupFolder,
+  );
+  let browserProfileId = groupConfig?.browserProfile ?? null;
+
+  if (groupConfig?.browserEnabled && getEnv().CLOAKBROWSER_MANAGER_URL) {
+    // Auto-create profile if not yet created
+    if (!browserProfileId) {
+      browserProfileId = await createBrowserProfile(groupFolder);
+      setBrowserProfile(groupFolder, browserProfileId);
+      logger.info(
+        { groupFolder, browserProfileId },
+        'Created CloakBrowser profile',
+      );
+    }
+    // Launch the profile so CDP is available
+    await launchBrowserProfile(browserProfileId);
+    logger.info(
+      { groupFolder, browserProfileId },
+      'Launched CloakBrowser profile',
+    );
+  }
+
   // Write base opencode.json (mounted ro at /workspace/opencode.json)
-  writeOpencodeConfig(groupFolder, model);
+  writeOpencodeConfig(groupFolder, model, browserProfileId);
 
   // Copy shared auth.json into group's opencode dir (OpenCode discovers it natively)
   writeAuthConfig(groupFolder);
@@ -570,13 +686,6 @@ async function spawnContainer(
 
   // No port publish needed — host connects via Docker network using container name
   // Note: no --rm so we can fetch logs on crash; containers are cleaned up in spawnContainer
-  const vncBasePort = getEnv().VNC_BASE_PORT;
-  const vncPassword = getEnv().VNC_PASSWORD;
-  let vncHostPort: number | undefined;
-  if (vncBasePort) {
-    vncHostPort = vncBasePort + vncPortCounter++;
-    vncPorts.set(groupFolder, vncHostPort);
-  }
 
   // When host runs locally (outside Docker), publish the OpenCode port to localhost
   let agentPort: number | undefined;
@@ -595,19 +704,11 @@ async function spawnContainer(
     DOCKER_NETWORK,
     // OpenCode port mapping (only when host runs outside Docker)
     ...(agentPort ? ['-p', `${agentPort}:${OPENCODE_PORT}`] : []),
-    // VNC port mapping (only if VNC_BASE_PORT is configured)
-    ...(vncHostPort ? ['-p', `${vncHostPort}:6080`] : []),
     // Environment
     '-e',
     `OPENCODE_PORT=${OPENCODE_PORT}`,
     '-e',
     `GROUP_FOLDER=${groupFolder}`,
-    // VNC environment
-    ...(vncHostPort ? ['-e', `VNC_EXTERNAL_PORT=${vncHostPort}`] : []),
-    ...(vncPassword ? ['-e', `VNC_PASSWORD=${vncPassword}`] : []),
-    ...(process.env['VNC_HOST_ADDRESS']
-      ? ['-e', `VNC_HOST_ADDRESS=${process.env['VNC_HOST_ADDRESS']}`]
-      : []),
     // Enable built-in websearch tool (Exa AI — no API key required)
     '-e',
     'OPENCODE_ENABLE_EXA=1',
@@ -796,6 +897,16 @@ export async function stopGroupContainer(groupFolder: string): Promise<void> {
   agentHostPorts.delete(groupFolder);
   containerModels.delete(groupFolder);
   lastActivity.delete(groupFolder);
+
+  // Stop the CloakBrowser profile if one is assigned
+  const groups = getAllRegisteredGroups();
+  const groupConfig = Object.values(groups).find(
+    (g) => g.folder === groupFolder,
+  );
+  if (groupConfig?.browserProfile && getEnv().CLOAKBROWSER_MANAGER_URL) {
+    await stopBrowserProfile(groupConfig.browserProfile);
+  }
+
   logger.info({ groupFolder }, 'Agent container stopped and removed');
 }
 

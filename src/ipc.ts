@@ -695,6 +695,7 @@ export async function processTaskIpc(
         channel: channelFromJid(data.jid),
         isMain: data.isMain === true,
         alwaysRespond: data.alwaysRespond === true || data.isMain === true,
+        browserEnabled: false,
         createdAt: Date.now(),
         ...(data.model !== undefined && { model: data.model || null }),
         ...(data.extraMounts !== undefined && {
@@ -801,6 +802,9 @@ export async function processTaskIpc(
         ...(data.extraMounts !== undefined && {
           extraMounts: data.extraMounts,
         }),
+        ...(data.browserEnabled !== undefined && {
+          browserEnabled: data.browserEnabled,
+        }),
       };
       // Only call setRegisteredGroup for non-jid changes (jid was already migrated above)
       if (!oldJid) {
@@ -819,6 +823,7 @@ export async function processTaskIpc(
             trigger: data.trigger,
             alwaysRespond: data.alwaysRespond,
             model: data.model,
+            browserEnabled: data.browserEnabled,
           },
         },
         'Group updated via IPC',

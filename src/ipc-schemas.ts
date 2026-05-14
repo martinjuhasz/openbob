@@ -80,6 +80,7 @@ export const updateGroupSchema = z.object({
   alwaysRespond: z.boolean().optional(),
   model: z.union([z.string(), z.null()]).optional(),
   extraMounts: z.union([z.array(extraMountSchema), z.null()]).optional(),
+  browserEnabled: z.boolean().optional(),
 });
 
 export const resetSessionSchema = z.object({

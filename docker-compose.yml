@@ -39,10 +39,9 @@ services:
       - OPENVIKING_API_KEY=${OPENVIKING_API_KEY:-openbob-local}
       # Optional
       - LOG_LEVEL=${LOG_LEVEL:-info}
-      # VNC browser sessions
-      - VNC_BASE_PORT=${VNC_BASE_PORT:-}
-      - VNC_PASSWORD=${VNC_PASSWORD:-}
-      - VNC_HOST_ADDRESS=${VNC_HOST_ADDRESS:-}
+      # CloakBrowser-Manager
+      - CLOAKBROWSER_MANAGER_URL=${CLOAKBROWSER_MANAGER_URL:-http://cloakbrowser-manager:8080}
+      - CLOAKBROWSER_AUTH_TOKEN=${CLOAKBROWSER_AUTH_TOKEN:-}
     networks:
       - openbob
 
@@ -98,6 +97,21 @@ services:
       - openbob
     profiles:
       - memory
+
+  cloakbrowser-manager:
+    image: cloakhq/cloakbrowser-manager
+    container_name: cloakbrowser-manager
+    restart: unless-stopped
+    ports:
+      - "${CLOAKBROWSER_PORT:-8080}:8080"
+    volumes:
+      - ${DATA_PATH}/browser-profiles:/data
+    environment:
+      - AUTH_TOKEN=${CLOAKBROWSER_AUTH_TOKEN:-}
+    networks:
+      - openbob
+    profiles:
+      - browser
 
 networks:
   openbob:

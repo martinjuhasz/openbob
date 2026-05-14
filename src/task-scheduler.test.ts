@@ -62,6 +62,7 @@ function makeDeps(overrides: Partial<SchedulerDeps> = {}): SchedulerDeps {
         channel: 'telegram',
         isMain: false,
         alwaysRespond: false,
+        browserEnabled: false,
         createdAt: Date.now(),
       },
     }),

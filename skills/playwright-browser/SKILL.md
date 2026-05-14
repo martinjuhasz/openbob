@@ -1,36 +1,44 @@
 # playwright-browser
 
-Browse the web using `playwright-cli`. Supports persistent browser profiles for authenticated sessions.
+Browse the web using the Playwright MCP browser tools. Your browser session is managed by the CloakBrowser-Manager — the profile is automatically started when your container launches.
 
-## Quick start (headless)
+## Available tools
 
-```bash
-playwright-cli -s=<name> open <url> --persistent --profile=/workspace/data/project/.browser-profiles/<name>
-playwright-cli -s=<name> snapshot -i       # Get interactive elements
-playwright-cli -s=<name> click @e1         # Click element
-playwright-cli -s=<name> fill @e2 "text"   # Fill input
-playwright-cli -s=<name> screenshot        # Take screenshot
-playwright-cli -s=<name> close             # Close browser (profile remains)
-```
+When browser is enabled for your group, these MCP tools are available:
 
-## Persistent profiles
+- `browser_navigate` — Navigate to a URL
+- `browser_snapshot` — Get a text snapshot of the page (preferred over screenshot)
+- `browser_click` — Click an element
+- `browser_type` — Type text into an element
+- `browser_fill_form` — Fill multiple form fields
+- `browser_select_option` — Select dropdown option
+- `browser_hover` — Hover over an element
+- `browser_press_key` — Press a keyboard key
+- `browser_take_screenshot` — Take a screenshot
+- `browser_tabs` — List, create, close, or select tabs
+- `browser_close` — Close the current page
+- `browser_wait_for` — Wait for text to appear/disappear
 
-Browser profiles (cookies, localStorage, sessions) are saved under `/workspace/data/project/.browser-profiles/<name>/` and persist across container restarts.
+## Workflow
 
-## VNC Browser Sessions (for manual login)
+1. Use `browser_navigate` to open a URL
+2. Use `browser_snapshot` to understand the page structure
+3. Interact with elements using `browser_click`, `browser_type`, etc.
+4. Use `browser_take_screenshot` to capture visual state
 
-If a profile doesn't exist yet or the login has expired, use the MCP tools to let the user log in manually:
+The browser connects automatically on your first tool call — no setup needed.
 
-1. `vnc_browser_session_start` — opens a real browser with GUI, accessible via noVNC
-2. User opens the provided URL, logs in, then confirms they're done
-3. `vnc_browser_session_stop` — closes the VNC browser, profile is saved
-4. Now use the profile headless with `playwright-cli` as shown above
+## Manual login by user (noVNC)
 
-Use `vnc_browser_session_status` to check active sessions and saved profiles.
+If the user needs to log into a website manually (e.g. for 2FA, captchas):
+
+1. Tell the user to open the CloakBrowser-Manager web UI
+2. They can see the browser profile and interact with it via the built-in noVNC viewer
+3. noVNC and your CDP connection run in parallel — no need to stop anything
+4. After the user logs in, you can continue using the browser tools with the authenticated session
 
 ## Important
 
-- Only ONE VNC session can be active at a time (per group)
-- Multiple profiles can be saved and used headless simultaneously
-- Never use `playwright-cli` on a profile that has an active VNC session (lock conflict)
-- If headless access fails with auth errors, suggest the user re-login via VNC
+- The browser profile persists cookies and sessions across container restarts
+- noVNC and headless CDP access work simultaneously on the same profile
+- If browser tools are not available, browser is not enabled for your group

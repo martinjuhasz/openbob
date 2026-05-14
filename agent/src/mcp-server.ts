@@ -11,12 +11,6 @@ import fs from 'fs';
 import path from 'path';
 import { CronExpressionParser } from 'cron-parser';
 import { transcribeMedia } from './transcription.js';
-import {
-  startVncBrowserSession,
-  stopVncBrowserSession,
-  getActiveVncSessionName,
-  listBrowserProfiles,
-} from './vnc-browser-session.js';
 
 const IPC_DIR = '/workspace/data/ipc';
 const MESSAGES_DIR = path.join(IPC_DIR, 'messages');
@@ -107,7 +101,7 @@ server.tool(
 
 server.tool(
   'send_photo',
-  'Send a photo/image to the user or group. The file must exist on the local filesystem (e.g. a screenshot taken with playwright-cli). You can also pass an HTTP(S) URL.',
+  'Send a photo/image to the user or group. The file must exist on the local filesystem (e.g. a screenshot taken with the browser MCP tools). You can also pass an HTTP(S) URL.',
   {
     source: z
       .string()
@@ -1305,100 +1299,6 @@ Speech-to-text requires the STT service to be running (docker compose --profile 
         isError: true,
       };
     }
-  },
-);
-
-// ── VNC Browser Session tools ──────────────────────────────────────────
-
-server.tool(
-  'vnc_browser_session_start',
-  `Start a VNC browser session for manual login. Opens a real browser (with GUI) accessible via noVNC in the user's web browser.
-Use this when a user needs to log into a website manually so the session can be persisted for later headless use.
-Only one VNC browser session can be active at a time per group.
-The browser profile is persisted under .browser-profiles/<name>/ and can later be used headless with playwright-cli.`,
-  {
-    name: z
-      .string()
-      .regex(/^[a-z0-9][a-z0-9._-]{0,63}$/)
-      .describe(
-        'Profile name for the browser session (e.g. "kleinanzeigen", "amazon"). Lowercase, no spaces.',
-      ),
-    url: z
-      .string()
-      .optional()
-      .describe('URL to navigate to after opening the browser.'),
-  },
-  async (args: { name: string; url?: string }) => {
-    try {
-      const result = await startVncBrowserSession(args.name, args.url);
-      return {
-        content: [
-          {
-            type: 'text' as const,
-            text: `VNC browser session "${args.name}" started.\n\nOpen this URL in your browser to interact:\n${result.url}\n\nWhen you're done (e.g. after logging in), tell me to stop the VNC session. The profile will be saved for future headless use.`,
-          },
-        ],
-      };
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Unknown error';
-      return {
-        content: [{ type: 'text' as const, text: `Failed: ${message}` }],
-        isError: true,
-      };
-    }
-  },
-);
-
-server.tool(
-  'vnc_browser_session_stop',
-  `Stop the active VNC browser session. The browser profile remains saved on disk for future headless use with playwright-cli.
-Call this after the user confirms they are done with manual browser interaction.`,
-  {
-    name: z.string().describe('Name of the VNC browser session to stop.'),
-  },
-  async (args: { name: string }) => {
-    try {
-      await stopVncBrowserSession(args.name);
-      return {
-        content: [
-          {
-            type: 'text' as const,
-            text: `VNC browser session "${args.name}" stopped. Profile saved. You can now use this profile headless with:\n\nplaywright-cli -s=${args.name} open <url> --persistent --profile=/workspace/data/project/.browser-profiles/${args.name}`,
-          },
-        ],
-      };
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Unknown error';
-      return {
-        content: [{ type: 'text' as const, text: `Failed: ${message}` }],
-        isError: true,
-      };
-    }
-  },
-);
-
-server.tool(
-  'vnc_browser_session_status',
-  `Check the status of VNC browser sessions. Shows active session and lists all persisted profiles.`,
-  {},
-  async () => {
-    const activeName = getActiveVncSessionName();
-    const profiles = listBrowserProfiles();
-
-    const lines: string[] = [];
-    if (activeName) {
-      lines.push(`Active VNC session: ${activeName}`);
-    } else {
-      lines.push('No active VNC session.');
-    }
-    if (profiles.length > 0) {
-      lines.push(`\nSaved browser profiles: ${profiles.join(', ')}`);
-    } else {
-      lines.push('\nNo saved browser profiles.');
-    }
-    return {
-      content: [{ type: 'text' as const, text: lines.join('\n') }],
-    };
   },
 );
 

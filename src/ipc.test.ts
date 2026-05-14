@@ -82,6 +82,7 @@ function makeGroup(overrides: Partial<GroupConfig> = {}): GroupConfig {
     channel: 'telegram',
     isMain: false,
     alwaysRespond: false,
+    browserEnabled: false,
     createdAt: Date.now(),
     ...overrides,
   };

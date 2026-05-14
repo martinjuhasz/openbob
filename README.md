@@ -82,8 +82,8 @@ The host manages all OpenViking communication — the agent itself doesn't need 
 - **Isolated group context** — Each group gets its own Docker container, workspace, `opencode.json` config, and session history.
 - **Main channel** — A privileged admin channel that can register new groups and manage the system.
 - **Scheduled tasks** — Cron, interval, or one-shot tasks that spin up the agent and can message results back.
-- **Web access** — Agents have Chromium and `@playwright/cli` for headless browsing, screenshots, and web interaction with persistent browser profiles.
-- **VNC Browser Sessions** — Start a noVNC session to manually log into websites. The authenticated browser profile is then reusable by the agent headlessly — no credentials shared with the system.
+- **Web access** — Agents can browse the web via [CloakBrowser-Manager](https://github.com/CloakHQ/CloakBrowser-Manager) with stealth browser profiles and `@playwright/mcp` for headless automation via CDP.
+- **Browser profiles** — Persistent, per-group browser profiles managed by CloakBrowser-Manager. The user can interact via the built-in noVNC viewer (manual login, 2FA) while the agent automates headlessly — both work simultaneously on the same profile.
 - **Per-group model override** — Different groups can use different LLM models.
 - **MCP tools** — Agents have access to custom tools (send messages, schedule tasks, manage groups) via the Model Context Protocol.
 - **Skills** — Read-only skill packs mounted into containers (e.g., `playwright-browser`, `status`).
@@ -205,7 +205,7 @@ docker compose --profile stt up -d
 Profiles can be combined:
 
 ```bash
-docker compose --profile memory --profile stt up -d
+docker compose --profile memory --profile stt --profile browser up -d
 ```
 
 ### First Message
@@ -318,6 +318,7 @@ All containers share the `openbob` Docker network. The host reaches agent contai
 │                                             │
 │  openbob-stt (optional, :8000)              │
 │  openbob-openviking (optional, :1933)       │
+│  cloakbrowser-manager (optional, :8080)     │
 └─────────────────────────────────────────────┘
 ```
 
@@ -344,9 +345,9 @@ All containers share the `openbob` Docker network. The host reaches agent contai
 | `OPENVIKING_URL`        | No        | OpenViking API URL (default: `http://openviking:1933`)            |
 | `OPENVIKING_API_KEY`    | No        | OpenViking root API key — required for `group` scope provisioning |
 | `OPENVIKING_SCOPE`      | No        | `global` or `group` (default: `global`) — see below               |
-| `VNC_BASE_PORT`         | No        | Base port for noVNC access (e.g. `7000`). Each group gets +1. Required for VNC browser sessions. |
-| `VNC_PASSWORD`          | No        | Password for noVNC sessions. If unset, no auth required.          |
-| `VNC_HOST_ADDRESS`      | No        | IP/hostname the agent reports in the noVNC URL (default: `localhost`) |
+| `CLOAKBROWSER_MANAGER_URL` | No     | CloakBrowser-Manager URL (default: `http://cloakbrowser-manager:8080`). Required for browser profiles. |
+| `CLOAKBROWSER_AUTH_TOKEN`  | No     | Auth token for CloakBrowser-Manager API (optional)                |
+| `CLOAKBROWSER_PORT`     | No        | Host port for CloakBrowser-Manager web UI (default: `8080`)       |
 
 > **Note:** LLM provider API keys are **not** configured via environment variables. Authentication is handled entirely through `auth.json` — see [Authentication](#authentication).
 
@@ -399,29 +400,39 @@ On first startup, the ~600MB ONNX model is downloaded from HuggingFace and cache
 | ----------- | --------------------------- | ---------------------- |
 | `STT_MODEL` | `nemo-parakeet-tdt-0.6b-v3` | Parakeet model variant |
 
-### VNC Browser Sessions
+### Browser Profiles (CloakBrowser-Manager)
 
-openbob supports persistent, authenticated browser sessions without ever sharing credentials with the system. The workflow:
+openbob supports persistent, authenticated browser sessions via [CloakBrowser-Manager](https://github.com/CloakHQ/CloakBrowser-Manager) — a stealth browser automation service with anti-bot detection. Each group can optionally have its own browser profile.
 
-1. **Tell the agent** to start a VNC browser session (e.g. "Starte eine Browser-Session für kleinanzeigen")
-2. **The agent** calls `vnc_browser_session_start` → starts Xvfb + noVNC + Chromium inside the container
-3. **You get a URL** (e.g. `http://192.168.1.x:7000/vnc.html`) — open it, log in manually
-4. **Tell the agent** you're done → it calls `vnc_browser_session_stop`, browser closes, profile is saved
-5. **From now on**, the agent uses the saved profile headlessly via `playwright-cli` — fully authenticated, no credentials in env vars
+**How it works:**
+
+1. Enable browser for a group via `update_group` (sets `browserEnabled: true`)
+2. On next container start, the host auto-creates a CloakBrowser profile and launches it
+3. The agent gets `@playwright/mcp` browser tools (`browser_navigate`, `browser_click`, `browser_snapshot`, etc.) connected via CDP
+4. The user can interact with the same browser via the CloakBrowser-Manager web UI (built-in noVNC viewer) — e.g. for manual login, 2FA, captchas
+5. noVNC and headless CDP work simultaneously on the same profile — no need to stop one for the other
+6. Browser profiles persist cookies and sessions across container restarts
 
 **Setup:**
 
 ```bash
-# Add to .env
-VNC_BASE_PORT=7000                  # Required to enable VNC
-VNC_PASSWORD=optional-password      # Optional — protects the noVNC session
-VNC_HOST_ADDRESS=192.168.1.100      # Optional — your LAN IP (for the URL the agent returns)
+# Start CloakBrowser-Manager alongside openbob
+docker compose --profile browser up -d
 ```
 
-**Constraints:**
-- One active VNC session per group (multiple saved profiles are fine)
-- VNC and headless access can't use the same profile simultaneously
-- Profiles are stored under `.browser-profiles/<name>/` in the group's workspace volume
+```bash
+# Optional — add to .env
+CLOAKBROWSER_AUTH_TOKEN=your-token    # Optional — protects the Manager API
+CLOAKBROWSER_PORT=8080                # Optional — host port for the web UI
+```
+
+The CloakBrowser-Manager web UI is available at `http://localhost:8080` (or your configured port). Profile data is stored under `${DATA_PATH}/browser-profiles/`.
+
+**Lifecycle:**
+
+- Browser profiles are created automatically when a group has `browserEnabled: true`
+- Profiles are launched when the agent container starts and stopped when it stops (including idle timeout)
+- Changing `browserEnabled` triggers a container restart
 
 ## MCP Servers
 
@@ -475,7 +486,7 @@ Built-in skills:
 
 | Skill               | Description                                                              |
 | ------------------- | ------------------------------------------------------------------------ |
-| `playwright-browser` | Web browsing via `@playwright/cli` with persistent profiles + VNC login |
+| `playwright-browser` | Web browsing via `@playwright/mcp` with CloakBrowser-Manager profiles |
 | `status`            | System status reporting (containers, health, tasks)                      |
 
 ## Development

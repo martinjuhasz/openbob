@@ -2,31 +2,9 @@
 # Runs OpenCode SDK in isolated container, one per active session
 FROM node:22-slim
 
-# System dependencies for Chromium (playwright-cli) and media tools
+# System dependencies for media tools
 RUN apt-get update && apt-get install -y \
-    chromium \
     ffmpeg \
-    fonts-liberation \
-    fonts-noto-cjk \
-    fonts-noto-color-emoji \
-    libgbm1 \
-    libnss3 \
-    libatk-bridge2.0-0 \
-    libgtk-3-0 \
-    libx11-xcb1 \
-    libxcomposite1 \
-    libxdamage1 \
-    libxrandr2 \
-    libasound2 \
-    libpangocairo-1.0-0 \
-    libcups2 \
-    libdrm2 \
-    libxshmfence1 \
-    # VNC browser session support
-    xvfb \
-    x11vnc \
-    novnc \
-    websockify \
     curl \
     git \
     && rm -rf /var/lib/apt/lists/*
@@ -35,10 +13,8 @@ RUN apt-get update && apt-get install -y \
 RUN curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp \
     -o /usr/local/bin/yt-dlp && chmod a+rx /usr/local/bin/yt-dlp
 
-# playwright-cli config is written at container start (see ENTRYPOINT)
-
-# Install opencode CLI and playwright-cli globally
-RUN npm install -g opencode-ai @playwright/cli
+# Install opencode CLI globally
+RUN npm install -g opencode-ai
 
 WORKDIR /app
 
@@ -68,5 +44,4 @@ USER node
 WORKDIR /workspace/data/project
 
 # Symlink ~/.local/share/opencode → /workspace/data/opencode so OpenCode finds its auth + config
-# Write playwright-cli config to use system Chromium instead of Google Chrome
-ENTRYPOINT ["sh", "-c", "ln -sfn /workspace/data/opencode /home/node/.local/share/opencode && mkdir -p /workspace/data/project/.playwright && printf '{\"browser\":{\"launchOptions\":{\"executablePath\":\"/usr/bin/chromium\"}}}' > /workspace/data/project/.playwright/cli.config.json && exec node /app/dist/index.js"]
+ENTRYPOINT ["sh", "-c", "ln -sfn /workspace/data/opencode /home/node/.local/share/opencode && exec node /app/dist/index.js"]
