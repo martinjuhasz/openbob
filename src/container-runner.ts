@@ -143,7 +143,7 @@ async function launchBrowserProfile(profileId: string): Promise<void> {
     method: 'POST',
     headers: cloakHeaders(),
   });
-  if (!res.ok) {
+  if (!res.ok && res.status !== 409) {
     const body = await res.text().catch(() => '');
     throw new Error(
       `Failed to launch browser profile ${profileId}: ${res.status} ${body.slice(0, 500)}`,
@@ -583,8 +583,9 @@ function writeOpencodeConfig(
       : managerUrl;
     const cdpUrl = `${agentManagerUrl}/api/profiles/${browserProfileId}/cdp`;
     mergedMcp['playwright'] = {
-      command: 'npx',
-      args: ['@playwright/mcp', '--cdp-endpoint', cdpUrl],
+      type: 'local',
+      enabled: true,
+      command: ['npx', '@playwright/mcp', '--cdp-endpoint', cdpUrl],
     };
   } else {
     // Remove stale playwright entry if browser was disabled

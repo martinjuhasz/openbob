@@ -37,6 +37,23 @@ If the user needs to log into a website manually (e.g. for 2FA, captchas):
 3. noVNC and your CDP connection run in parallel — no need to stop anything
 4. After the user logs in, you can continue using the browser tools with the authenticated session
 
+## When to use the browser (instead of WebFetch/Exa)
+
+**Always use browser tools when:**
+- The user explicitly says "im Browser", "browse", "surf", or "öffne"
+- You need to interact with a page (click, fill forms, login, scroll)
+- The site requires JavaScript rendering to show content
+- You need to take a visual screenshot of a page
+- You are working with an authenticated session (cookies from previous login)
+- The site blocks bots/scrapers (use the stealth browser profile)
+
+**Use SearXNG/WebFetch when:**
+- You only need to read static text content from a URL
+- You're doing a quick web search for information
+- No interaction or authentication is needed
+
+**When in doubt and browser is enabled, prefer browser tools.**
+
 ## Important
 
 - The browser profile persists cookies and sessions across container restarts
