@@ -1,6 +1,25 @@
 # playwright-browser
 
-Browse the web using the Playwright MCP browser tools. Your browser session is managed by the CloakBrowser-Manager — the profile is automatically started when your container launches.
+Browse the web using the Playwright MCP browser tools connected to a **CloakBrowser-Manager** stealth browser profile via CDP (Chrome DevTools Protocol).
+
+## How it works
+
+You are NOT running a local headless Chromium. Your Playwright tools connect via CDP to a remote browser instance managed by CloakBrowser-Manager. This browser:
+
+- Runs in **headed mode** (has a visible GUI accessible via noVNC)
+- Uses a **persistent profile** with cookies, localStorage, and sessions that survive restarts
+- Has **anti-bot/fingerprint protection** (stealth browser, not a standard Chromium)
+- Is shared between you and the user — the user can see and interact with the same browser session via the noVNC web UI at any time
+
+## User interaction
+
+The user can open the CloakBrowser-Manager web UI and interact with your browser session simultaneously:
+- They can log into sites manually (2FA, captchas)
+- They can see what you're doing in real-time
+- Changes they make (clicking, typing) are immediately visible to you
+- You do NOT need to stop or restart anything — noVNC and your CDP connection work in parallel on the same browser
+
+When the user says they've done something in the browser (e.g. "I logged in"), use any browser tool to inspect the current page state.
 
 ## Available tools
 

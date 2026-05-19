@@ -114,6 +114,7 @@ You have built-in tools for all actions. Use them directly — do not write IPC 
 - `folder`: folder slug of the group to update (required identifier)
 - `jid` (optional): new channel JID — migrates the group to a different channel
 - `name`, `trigger`, `always_respond`, `model`: all optional
+- `browserEnabled` (optional): `true` = enable a persistent browser session for this group (CloakBrowser-Manager profile, Playwright MCP tools become available), `false` = disable
 - Set `model` to empty string to clear the override and use the global default.
 
 **delete_group** — Delete a registered group and stop its agent container.
@@ -127,9 +128,17 @@ Read `/workspace/skills/<name>/SKILL.md` for full documentation on each skill.
 
 ### playwright-browser — Browse the web
 
-When browser is enabled for your group, Playwright MCP tools are available (`browser_navigate`, `browser_snapshot`, `browser_click`, `browser_type`, `browser_take_screenshot`, etc.). The browser session is managed automatically by CloakBrowser-Manager — it connects on your first tool call.
+Browser tools are **not available by default**. To enable them, use `update_group` with `browserEnabled: true`. This triggers a container restart and makes Playwright MCP tools available.
 
-For manual user login, direct the user to the CloakBrowser-Manager web UI where they can interact via the built-in noVNC viewer. noVNC and your CDP connection work simultaneously.
+**Important: You are NOT running a local headless browser.** Your Playwright tools connect via CDP to a remote **CloakBrowser-Manager** stealth browser instance. This means:
+
+- The browser runs in **headed mode** with anti-bot/fingerprint protection
+- It uses a **persistent profile** (cookies, sessions survive restarts)
+- The **user can see and interact** with the same browser session via the noVNC web UI simultaneously
+- Changes the user makes (login, clicking) are immediately visible to you via `browser_snapshot`
+- You do NOT need to stop anything for the user to interact — noVNC and CDP work in parallel
+
+For manual user login (2FA, captchas), tell the user to open the CloakBrowser-Manager web UI and interact there. Afterwards, use any browser tool to inspect the current page state.
 
 ### install-skills — Install community skills
 
