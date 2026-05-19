@@ -1,7 +1,8 @@
 // openbob Agent Container — starts OpenCode as a server
 // Host process connects via HTTP at port 4096
 
-import { createOpencodeServer } from '@opencode-ai/sdk';
+import { createOpencodeServer, createOpencodeClient } from '@opencode-ai/sdk';
+import type { GlobalEvent } from '@opencode-ai/sdk';
 import { fileURLToPath } from 'url';
 import path from 'path';
 
@@ -56,6 +57,71 @@ process.on('SIGINT', () => {
   server.close();
   process.exit(0);
 });
+
+// Debug event logger — streams all session events to stdout
+if (process.env['OPENCODE_LOG_LEVEL'] === 'DEBUG') {
+  const log = (msg: string) => process.stdout.write(`[agent:debug] ${msg}\n`);
+
+  const startEventLogger = async () => {
+    const client = createOpencodeClient({
+      baseUrl: `http://localhost:${PORT}`,
+    });
+    const messageRoles = new Map<string, 'user' | 'assistant'>();
+
+    while (true) {
+      try {
+        const { stream } = await client.global.event();
+        for await (const globalEvent of stream) {
+          const event = (globalEvent as unknown as GlobalEvent).payload;
+          if (!event || !('type' in event)) continue;
+
+          if (event.type === 'message.updated') {
+            const info = event.properties.info;
+            messageRoles.set(info.id, info.role);
+
+            if (info.role === 'user') {
+              log('── user message ──────────────────');
+              if (info.system) {
+                log(`system:\n${info.system}`);
+              }
+            }
+
+            if (info.role === 'assistant' && 'tokens' in info) {
+              const t = info.tokens;
+              log('── complete ──────────────────────');
+              log(
+                `model=${info.modelID} | in=${t.input} out=${t.output} reasoning=${t.reasoning} cache_r=${t.cache.read} cache_w=${t.cache.write} | cost=$${info.cost.toFixed(4)}`,
+              );
+            }
+          }
+
+          if (event.type === 'message.part.updated') {
+            const { part } = event.properties;
+            const role = messageRoles.get(part.messageID);
+
+            if (part.type === 'text') {
+              if (role === 'user') {
+                log(`prompt:\n${part.text}`);
+              } else if (role === 'assistant') {
+                log(`response:\n${part.text}`);
+              }
+            }
+
+            if (part.type === 'reasoning') {
+              log(`thinking:\n${part.text}`);
+            }
+          }
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        log(`event stream error: ${msg}, reconnecting...`);
+        await new Promise((r) => setTimeout(r, 1000));
+      }
+    }
+  };
+
+  startEventLogger().catch(() => {});
+}
 
 // Keep alive
 await new Promise<never>(() => {});

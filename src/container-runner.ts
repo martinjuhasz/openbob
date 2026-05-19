@@ -8,7 +8,7 @@ import path from 'path';
 import { createOpencodeClient } from '@opencode-ai/sdk';
 import { promisify } from 'util';
 
-import { DATA_DIR, GROUPS_DIR } from './config.js';
+import { DATA_DIR, GROUPS_DIR, INSTANCE_ID } from './config.js';
 import {
   setSession,
   getSession,
@@ -94,7 +94,7 @@ function buildExtraMountArgs(groupFolder: string): string[] {
   return args;
 }
 
-const DOCKER_NETWORK = process.env['DOCKER_NETWORK'] ?? 'openbob';
+const DOCKER_NETWORK = process.env['DOCKER_NETWORK'] ?? INSTANCE_ID;
 // DATA_PATH: absolute path on the Docker host (same value used in compose bind mount)
 const DATA_PATH_HOST = process.env['DATA_PATH'] ?? DATA_DIR;
 
@@ -492,7 +492,7 @@ export function startIdleChecker(): void {
 }
 
 function containerName(groupFolder: string): string {
-  return `openbob-agent-${groupFolder}`;
+  return `${INSTANCE_ID}-agent-${groupFolder}`;
 }
 
 /**
@@ -740,7 +740,7 @@ async function spawnContainer(
     ...buildExtraMountArgs(groupFolder),
     // Labels for cleanup
     '--label',
-    `openbob.group=${groupFolder}`,
+    `${INSTANCE_ID}.group=${groupFolder}`,
     AGENT_IMAGE,
   ];
 
@@ -1471,7 +1471,7 @@ export async function cleanupStoppedContainers(): Promise<void> {
       'ps',
       '-aq',
       '--filter',
-      'label=openbob.group',
+      `label=${INSTANCE_ID}.group`,
       '--filter',
       'status=exited',
       '--filter',
@@ -1497,7 +1497,7 @@ export async function cleanupAllAgentContainers(): Promise<void> {
       'ps',
       '-aq',
       '--filter',
-      'label=openbob.group',
+      `label=${INSTANCE_ID}.group`,
     ]);
     const ids = stdout.trim().split('\n').filter(Boolean);
     if (ids.length === 0) return;

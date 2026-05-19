@@ -9,6 +9,14 @@ export const SKILLS_DIR = process.env['SKILLS_DIR'] ?? '/skills';
 export const POLL_INTERVAL = 2000; // ms
 export const ASSISTANT_NAME = process.env['ASSISTANT_NAME'] ?? 'openbob';
 
+/**
+ * Instance identifier for multi-instance isolation.
+ * When set, container names, labels, and Docker network are namespaced
+ * so multiple openbob instances on the same host don't interfere.
+ * Defaults to 'openbob' (the original behavior).
+ */
+export const INSTANCE_ID = process.env['INSTANCE_ID'] ?? 'openbob';
+
 export const DB_PATH = path.join(DATA_DIR, 'openbob.db');
 
 /** Derive full channel name from a JID prefix (e.g. `tg:123` → `'telegram'`). */
