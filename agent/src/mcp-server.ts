@@ -690,6 +690,12 @@ Identify the group by its folder name. You can change any field including the JI
       .describe(
         'Host directories to bind-mount into the agent container. Replaces existing mounts. Set to empty array to clear.',
       ),
+    browser_enabled: z
+      .boolean()
+      .optional()
+      .describe(
+        'Enable a persistent CloakBrowser-Manager browser session for this group. Triggers container restart.',
+      ),
   },
   async (args: {
     folder: string;
@@ -703,6 +709,7 @@ Identify the group by its folder name. You can change any field including the JI
       container_path: string;
       read_only: boolean;
     }>;
+    browser_enabled?: boolean;
   }) => {
     const ctx = readContext();
     if (!ctx.isMain) {
@@ -733,6 +740,8 @@ Identify the group by its folder name. You can change any field including the JI
         containerPath: m.container_path,
         readOnly: m.read_only,
       }));
+    if (args.browser_enabled !== undefined)
+      data.browserEnabled = args.browser_enabled;
     writeIpcFile(TASKS_DIR, data);
     return {
       content: [{ type: 'text' as const, text: `Group update submitted.` }],
