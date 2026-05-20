@@ -653,6 +653,23 @@ async function main(): Promise<void> {
               'Failed to restart container after mount change',
             ),
           );
+      } else if (
+        (previousConfig?.browserEnabled ?? false) !== config.browserEnabled
+      ) {
+        logger.info(
+          { folder: config.folder, browserEnabled: config.browserEnabled },
+          'Browser enabled changed — restarting agent container',
+        );
+        stopGroupContainer(config.folder)
+          .then(() =>
+            warmUpContainers([{ folder: config.folder, model: newModel }]),
+          )
+          .catch((err) =>
+            logger.warn(
+              { folder: config.folder, err },
+              'Failed to restart container after browser change',
+            ),
+          );
       }
     },
     onGroupDeleted: (folder, jid) => {
