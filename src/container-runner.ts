@@ -582,15 +582,17 @@ function writeOpencodeConfig(
       ? 'http://cloakbrowser-manager:8080'
       : managerUrl;
     const cdpUrl = `${agentManagerUrl}/api/profiles/${browserProfileId}/cdp`;
-    mergedMcp['playwright'] = {
+    mergedMcp['browser'] = {
       type: 'local',
       enabled: true,
       command: ['npx', '@playwright/mcp', '--cdp-endpoint', cdpUrl],
     };
   } else {
-    // Remove stale playwright entry if browser was disabled
-    delete mergedMcp['playwright'];
+    // Remove stale browser entry if browser was disabled
+    delete mergedMcp['browser'];
   }
+  // Always remove built-in 'playwright' key to prevent OpenCode from launching its own Chromium
+  delete mergedMcp['playwright'];
 
   const config = { ...existing, ...template, model, mcp: mergedMcp };
 
