@@ -128,14 +128,16 @@ Read `/workspace/skills/<name>/SKILL.md` for full documentation on each skill.
 
 ### playwright-browser — Browse the web
 
-Browser tools are **not available by default**. To enable them, use `update_group` with `browserEnabled: true`. This triggers a container restart and makes Playwright MCP tools available.
+If you have `browser_*` tools available in your tool list (e.g. `browser_navigate`, `browser_snapshot`, `browser_click`), then browser is already enabled and ready to use — just call the tools directly. No need to check `list_groups` or `browserEnabled` first.
+
+If you do NOT have `browser_*` tools, browser is not enabled for your group. An admin can enable it with `update_group` and `browserEnabled: true` (triggers container restart).
 
 **Important: You are NOT running a local headless browser.** Your Playwright tools connect via CDP to a remote **CloakBrowser-Manager** stealth browser instance. This means:
 
 - The browser runs in **headed mode** with anti-bot/fingerprint protection
 - It uses a **persistent profile** (cookies, sessions survive restarts)
 - The **user can see and interact** with the same browser session via the noVNC web UI simultaneously
-- Changes the user makes (login, clicking) are immediately visible to you via `browser_snapshot`
+- Changes the user makes (login, clicking) are immediately visible to you via any browser tool
 - You do NOT need to stop anything for the user to interact — noVNC and CDP work in parallel
 
 For manual user login (2FA, captchas), tell the user to open the CloakBrowser-Manager web UI and interact there. Afterwards, use any browser tool to inspect the current page state.
