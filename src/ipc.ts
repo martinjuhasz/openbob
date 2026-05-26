@@ -566,6 +566,7 @@ export async function processTaskIpc(
           always_respond: g.alwaysRespond,
           model: g.model ?? null,
           extra_mounts: g.extraMounts ?? null,
+          browser_enabled: g.browserEnabled,
         }));
       writeIpcResponse(sourceGroup, data.requestId, { groups: groupList });
       logger.debug(
