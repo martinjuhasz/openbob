@@ -1,3 +1,8 @@
+---
+name: status
+description: Gather and report system status including registered groups, scheduled tasks, and service health. Use when the user asks for system status, health checks, or wants an overview of running services.
+---
+
 # status
 
 When asked for system status, gather and report:

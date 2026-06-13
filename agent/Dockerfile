@@ -21,11 +21,18 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm install
 
+# Install Chromium for local PDF generation (separate from CloakBrowser)
+RUN npx playwright install chromium --with-deps
+
 COPY src/ ./src/
+COPY scripts/ ./scripts/
 COPY tsconfig.json ./
 
 # Build TypeScript
 RUN npm run build
+
+# Install create-pdf CLI tool
+RUN ln -s /app/scripts/create-pdf.mjs /usr/local/bin/create-pdf
 
 # All runtime directories live under /workspace (mounted at runtime)
 RUN mkdir -p \

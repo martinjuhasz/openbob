@@ -1,3 +1,8 @@
+---
+name: playwright-browser
+description: Browse the web using Playwright MCP tools connected to a remote CloakBrowser-Manager stealth browser. Use for interactive website actions requiring login, sessions, form filling, or anti-bot protection. NOT for simple web search or content reading — use websearch/webfetch for that.
+---
+
 # playwright-browser
 
 Browse the web using the Playwright MCP browser tools connected to a **CloakBrowser-Manager** stealth browser profile via CDP (Chrome DevTools Protocol).

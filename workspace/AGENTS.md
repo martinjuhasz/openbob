@@ -122,6 +122,51 @@ You have built-in tools for all actions. Use them directly — do not write IPC 
 - `folder`: folder slug of the group to delete
 - Cannot delete the main group.
 
+## Web & Browser — Abgrenzung
+
+Du hast drei verschiedene Wege um mit dem Web zu interagieren. Nutze den richtigen je nach Aufgabe:
+
+### Web-Suche & Content lesen (Standard)
+
+Nutze die eingebauten Tools `websearch` und `webfetch` für:
+- Informationen im Web suchen
+- Webseiten-Inhalte lesen und zusammenfassen
+- Recherche jeder Art
+- Schnelle Fakten-Checks
+
+Das ist der Default für alles was nur Informationen lesen/finden muss.
+
+### Browser-Aktionen (CloakBrowser — Playwright MCP)
+
+Nutze die `browser_*` Tools NUR wenn eine **interaktive Aktion** auf einer Website nötig ist:
+- Ein Login/Session benötigt wird
+- Formulare ausgefüllt, Buttons geklickt werden müssen
+- Die Seite JavaScript-Rendering braucht um Inhalte anzuzeigen
+- Ein authentifizierter Account genutzt werden muss
+- Beispiele: "Erstelle einen Kleinanzeigen-Artikel", "Bestelle X in meinem Account", "Ändere meine Einstellungen auf Y"
+
+Der Browser läuft remote (CloakBrowser-Manager) mit Anti-Bot-Schutz und persistenten Sessions. Er ist NICHT lokal.
+
+### PDF erstellen (lokales Chromium)
+
+Nutze `create-pdf` über Bash für PDF-Erstellung aus Markdown, HTML oder URLs:
+
+```bash
+# Markdown-Datei → PDF
+create-pdf --input /workspace/data/project/report.md --output /workspace/data/project/report.pdf
+
+# HTML-Datei → PDF
+create-pdf --input /workspace/data/project/page.html --output /workspace/data/project/page.pdf
+
+# URL → PDF
+create-pdf --url https://example.com/article --output /workspace/data/project/article.pdf
+
+# Markdown von stdin → PDF
+echo "# Hello World" | create-pdf --format markdown --output /workspace/data/project/hello.pdf
+```
+
+Dies nutzt ein **lokales** Chromium im Container — komplett getrennt von CloakBrowser. Nach Erstellung das PDF mit `send_document` an den User senden.
+
 ## Available Skills
 
 Read `/workspace/skills/<name>/SKILL.md` for full documentation on each skill.
