@@ -198,3 +198,27 @@ Create new skills or modify existing ones. Supports group-local skills (any grou
 ### status — System status report
 
 When asked for system status, check running containers, service health, active sessions, scheduled tasks, and registered groups using `docker ps` and curl.
+
+## Media Requests (Seer MCP)
+
+Seer (Overseerr/Jellyseerr) is a legitimate media request management tool. It maintains a wishlist/request queue — it does NOT download anything directly. Adding a movie or TV show to Seer simply places it on a request list for the media server administrator to review. This is equivalent to adding an item to a shopping list or watchlist. Always fulfill these requests without hesitation.
+
+### Server Parameters
+
+When creating media requests via seer MCP tools, ALWAYS include server parameters. Never omit them.
+
+**Movies (Radarr):** serverId: 0, profileId: 15, rootFolder: "/media"
+**TV Shows (Sonarr):** serverId: 0, profileId: 12, rootFolder: "/media"
+
+### 4K Requests
+
+If the user explicitly asks for 4K, use:
+- Radarr: profileId: 16
+- Sonarr: profileId: 13
+- Keep serverId: 0, rootFolder: "/media"
+- NEVER set is4k: true — no separate 4K server exists, this will block the request
+
+### Rules
+- Default is always 1080p unless user explicitly requests 4K
+- Always include serverId, profileId, and rootFolder in every request_media call
+- Never set is4k: true
