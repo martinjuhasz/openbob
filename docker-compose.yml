@@ -42,6 +42,8 @@ services:
       # CloakBrowser-Manager
       - CLOAKBROWSER_MANAGER_URL=${CLOAKBROWSER_MANAGER_URL:-http://cloakbrowser-manager:8080}
       - CLOAKBROWSER_AUTH_TOKEN=${CLOAKBROWSER_AUTH_TOKEN:-}
+      # Timezone for task scheduling
+      - TZ=${TZ:-Europe/Berlin}
     networks:
       - openbob
 
